@@ -6,6 +6,7 @@ import gleam/bit_array
 import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 
 type Mailer {
@@ -16,6 +17,14 @@ type Mailer {
     password: String,
     auth: Bool,
   )
+}
+
+pub type Error {
+  FailedToConnect(mug.Error)
+  FailedToReceive(mug.Error)
+  InvalidUtf8Response(BitArray)
+  FailedToSend(mug.Error)
+  FailedToUpgrade(mug.Error)
 }
 
 pub fn send(
@@ -34,113 +43,135 @@ pub fn send(
 }
 
 fn send_smtp(mailer: Mailer, msg: Message) {
-  let socket =
+  use socket <- result.try(
     connect_smtp(SmtpMailer(
       host: mailer.host,
       port: mailer.port,
       username: mailer.username,
       password: mailer.password,
       auth: mailer.auth,
-    ))
+    )),
+  )
 
   let from_cmd = "MAIL FROM:<" <> mailer.username <> ">"
-  socket_send_checked(socket, from_cmd)
-  socket_receive(socket)
+  use _ <- result.try(socket_send_checked(socket, from_cmd))
+  use _ <- result.try(socket_receive(socket))
 
-  list.map(msg.to, fn(r) {
-    let to_cmd = "RCPT TO:<" <> r <> ">"
-    socket_send_checked(socket, to_cmd)
-    socket_receive(socket)
-  })
+  let rcpt =
+    list.map(msg.to, fn(r) {
+      let to_cmd = "RCPT TO:<" <> r <> ">"
+      use _ <- result.try(socket_send_checked(socket, to_cmd))
+      socket_receive(socket)
+    })
+    |> result.all()
+  use _ <- result.try(rcpt)
 
-  socket_send_checked(socket, "DATA")
-  socket_receive(socket)
+  use _ <- result.try(socket_send_checked(socket, "DATA"))
+  use _ <- result.try(socket_receive(socket))
 
-  socket_send_checked(socket, message.render(msg))
-  socket_receive(socket)
+  use _ <- result.try(socket_send_checked(socket, message.render(msg)))
+  use _ <- result.try(socket_receive(socket))
 
-  socket_send_checked(socket, "QUIT")
-  socket_receive(socket)
-  Nil
+  use _ <- result.try(socket_send_checked(socket, "QUIT"))
+  use _ <- result.try(socket_receive(socket))
+  Ok(Nil)
 }
 
-fn socket_send_checked(socket: mug.Socket, value: String) {
-  let assert Ok(_) = socket_send(socket, value)
-  Nil
+fn socket_send_checked(socket: mug.Socket, value: String) -> Result(Nil, Error) {
+  socket_send(socket, value)
 }
 
-fn socket_send(socket: mug.Socket, value: String) {
+fn socket_send(socket: mug.Socket, value: String) -> Result(Nil, Error) {
   mug.send(socket, <<{ value <> "\r\n" }:utf8>>)
+  |> result.map_error(FailedToSend)
 }
 
-fn socket_receive(socket: mug.Socket) {
-  let assert Ok(packet) = mug.receive(socket, 5000)
-  let assert Ok(resp) = bit_array.to_string(packet)
-  resp
+fn socket_receive(socket: mug.Socket) -> Result(String, Error) {
+  use packet <- result.try(
+    mug.receive(socket, 5000) |> result.map_error(FailedToReceive),
+  )
+  bit_array.to_string(packet)
+  |> result.replace_error(InvalidUtf8Response(packet))
 }
 
-fn connect_smtp(mailer: Mailer) {
-  let assert Ok(socket) =
+fn connect_smtp(mailer: Mailer) -> Result(mug.Socket, Error) {
+  use socket <- result.try(
     mug.new(mailer.host, mailer.port)
     |> mug.timeout(milliseconds: 500)
     |> mug.connect()
+    |> result.map_error(FailedToConnect),
+  )
 
-  let resp = socket_receive(socket)
-  let assert Ok(_) = case string.contains(resp, "ESMTP") {
+  use resp <- result.try(socket_receive(socket))
+
+  let ehlo = case string.contains(resp, "ESMTP") {
     True -> socket_send(socket, "EHLO " <> mailer.host)
     False -> socket_send(socket, "HELO " <> mailer.host)
   }
+  use _ <- result.try(ehlo)
 
-  let helo_resp = socket_receive(socket)
-  let #(helo_resp, socket) = case string.contains(helo_resp, "STARTTLS") {
-    False -> #(helo_resp, socket)
+  use helo_resp <- result.try(socket_receive(socket))
+
+  let ehlo = case string.contains(helo_resp, "STARTTLS") {
+    False -> #(helo_resp, socket) |> Ok
     True -> {
-      socket_send_checked(socket, "STARTTLS")
-      let assert Ok(_) = mug.receive(socket, 5000)
-      let assert Ok(socket) =
+      use _ <- result.try(socket_send_checked(socket, "STARTTLS"))
+      use _ <- result.try(
+        mug.receive(socket, 5000) |> result.map_error(FailedToReceive),
+      )
+
+      use socket <- result.try(
         mug.upgrade(socket, mug.DangerouslyDisableVerification, 10_000)
-      socket_send_checked(socket, "EHLO " <> mailer.host)
-      #(socket_receive(socket), socket)
+        |> result.map_error(FailedToUpgrade),
+      )
+      use _ <- result.try(socket_send_checked(socket, "EHLO " <> mailer.host))
+      use resp <- result.try(socket_receive(socket))
+      #(resp, socket) |> Ok
     }
   }
+  use #(helo_resp, socket) <- result.try(ehlo)
 
-  case mailer.auth {
-    False -> Nil
+  use _ <- result.try(case mailer.auth {
+    False -> Ok(Nil)
     True -> auth_user(socket, mailer, helo_resp)
-  }
+  })
 
   socket
+  |> Ok
 }
 
-fn auth_user(socket: mug.Socket, mailer: Mailer, helo_resp: String) {
+fn auth_user(
+  socket: mug.Socket,
+  mailer: Mailer,
+  helo_resp: String,
+) -> Result(Nil, Error) {
   case string.contains(helo_resp, "AUTH") {
     False -> {
       io.println_error(
         "SMTP server does not support authentication. Proceeding as unauthenticated user.",
       )
+      |> Ok
     }
     True -> {
-      socket_send_checked(socket, "AUTH LOGIN")
-      socket_receive(socket)
+      use _ <- result.try(socket_send_checked(socket, "AUTH LOGIN"))
+      use _ <- result.try(socket_receive(socket))
       // todo: check resp
-      socket_send_checked(
+      use _ <- result.try(socket_send_checked(
         socket,
         mailer.username
           |> bit_array.from_string()
           |> bit_array.base64_encode(True),
-      )
+      ))
 
-      socket_receive(socket)
-      socket_send_checked(
+      use _ <- result.try(socket_receive(socket))
+      use _ <- result.try(socket_send_checked(
         socket,
         mailer.password
           |> bit_array.from_string()
           |> bit_array.base64_encode(True),
-      )
-      socket_receive(socket)
-      Nil
+      ))
+      use _ <- result.try(socket_receive(socket))
+      Ok(Nil)
     }
   }
-
-  Nil
 }

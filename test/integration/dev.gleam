@@ -34,6 +34,7 @@ fn test_regular() {
 
   // Send the email
   // Navigate to localhost:8025 to view it in the browser.
-  smtp.send("localhost", 1025, Some(#("user1", "password1")), message)
+  let assert Ok(_) =
+    smtp.send("localhost", 1025, Some(#("user1", "password1")), message)
   process.sleep_forever()
 }
