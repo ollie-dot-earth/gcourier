@@ -1,5 +1,5 @@
 name = "gcourier"
-version = "1.3.0"
+version = "2.0.0"
 description = "Send emails with Gleam."
 licences = ["MIT"]
 repository = { type = "github", user = "gideongrinberg", repo = "gcourier" }
