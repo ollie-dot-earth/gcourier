@@ -1,6 +1,4 @@
 import gcourier
-import gcourier/message
-import gcourier/smtp
 import gleam/erlang/process
 import gleam/option.{Some}
 
@@ -12,12 +10,12 @@ fn test_regular() {
   gcourier.dev_server()
   // starts an SMTP server that captures and displays emails.
   let message =
-    message.build()
-    |> message.set_from("party@funclub.org", Some("The Fun Club 🎉"))
-    |> message.add_recipient("jane.doe@example.com", message.To)
-    |> message.add_recipient("john.doe@example.net", message.CC)
-    |> message.set_subject("You're Invited: Pizza & Ping Pong Night!")
-    |> message.set_html(
+    gcourier.new_message()
+    |> gcourier.set_from("party@funclub.org", Some("The Fun Club 🎉"))
+    |> gcourier.add_recipient("jane.doe@example.com", gcourier.To)
+    |> gcourier.add_recipient("john.doe@example.net", gcourier.CC)
+    |> gcourier.set_subject("You're Invited: Pizza & Ping Pong Night!")
+    |> gcourier.set_html(
       "
         <html>
             <body>
@@ -35,6 +33,6 @@ fn test_regular() {
   // Send the email
   // Navigate to localhost:8025 to view it in the browser.
   let assert Ok(_) =
-    smtp.send("localhost", 1025, Some(#("user1", "password1")), message)
+    gcourier.send("localhost", 1025, Some(#("user1", "password1")), message)
   process.sleep_forever()
 }
