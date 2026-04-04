@@ -25,6 +25,7 @@ pub type Error {
   InvalidUtf8Response(BitArray)
   FailedToSend(mug.Error)
   FailedToUpgrade(mug.Error)
+  FailedToCreateMessage(message.MessageCreationError)
 }
 
 pub fn send(
@@ -69,7 +70,11 @@ fn send_smtp(mailer: Mailer, msg: Message) {
   use _ <- result.try(socket_send_checked(socket, "DATA"))
   use _ <- result.try(socket_receive(socket))
 
-  use _ <- result.try(socket_send_checked(socket, message.render(msg)))
+  use message <- result.try(
+    message.render(msg) |> result.map_error(FailedToCreateMessage),
+  )
+
+  use _ <- result.try(socket_send_checked(socket, message))
   use _ <- result.try(socket_receive(socket))
 
   use _ <- result.try(socket_send_checked(socket, "QUIT"))

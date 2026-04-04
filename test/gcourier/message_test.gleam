@@ -98,7 +98,7 @@ pub fn render_headers_test() {
     |> message.set_subject("Test Subject")
     |> message.set_text("Hello world")
 
-  let rendered = message.render(msg)
+  let assert Ok(rendered) = message.render(msg)
 
   let should_contain = fn(a: String, b: String) {
     should.be_true(string.contains(a, b))
@@ -112,7 +112,29 @@ pub fn render_headers_test() {
   rendered |> should_contain("Hello world")
 }
 
-// TODO: missing from, missing to
+pub fn missing_from_test() {
+  let msg =
+    message.build()
+    |> message.add_recipient("to@example.com", message.To)
+    |> message.set_subject("Test Subject")
+    |> message.set_text("Hello world")
+
+  let rendered = message.render(msg)
+
+  assert rendered == Error(message.MissingFrom)
+}
+
+pub fn missing_to_test() {
+  let msg =
+    message.build()
+    |> message.set_from("from@example.com", None)
+    |> message.set_subject("Test Subject")
+    |> message.set_text("Hello world")
+
+  let rendered = message.render(msg)
+
+  assert rendered == Error(message.MissingRecipientTo)
+}
 
 pub fn week_day_test() {
   // Basic tests for each day of the week

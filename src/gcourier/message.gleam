@@ -6,12 +6,19 @@ import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import gleam/time/calendar
 import gleam/time/duration
 import gleam/time/timestamp
-import simplifile
 import youid/uuid
+
+pub type MessageCreationError {
+  MissingContentTypeHeader
+  MissingAttachments
+  MissingFrom
+  MissingRecipientTo
+}
 
 pub type Attachment {
   Attachment(name: String, content_type: String, content: String)
@@ -38,26 +45,30 @@ pub fn build() -> Message {
   Message(dict.from_list([]), [], [], [], "", None)
 }
 
-pub fn render(message: Message) {
+pub fn render(message: Message) -> Result(String, MessageCreationError) {
   case message.attachments {
     Some(_) -> render_multipart(message)
     None -> render_single(message)
   }
 }
 
+fn render_single(message: Message) -> Result(String, MessageCreationError) {
+  use headers <- result.try(get_headers(message))
 
-fn render_single(message: Message) {
   let headers =
-    get_headers(message)
+    headers
     |> list.map(fn(header) { header.0 <> ": " <> header.1 })
     |> string.join("\r\n")
 
-  headers <> "\r\n\r\n" <> message.content <> "\r\n."
+  Ok(headers <> "\r\n\r\n" <> message.content <> "\r\n.")
 }
 
-fn render_multipart(message: Message) {
+fn render_multipart(message: Message) -> Result(String, MessageCreationError) {
   let boundary = uuid.v4_string()
-  let assert Ok(body_ctype) = dict.get(message.headers, "Content-Type")
+  use body_ctype <- result.try(
+    dict.get(message.headers, "Content-Type")
+    |> result.replace_error(MissingContentTypeHeader),
+  )
   let message =
     message
     |> set_header(
@@ -65,7 +76,9 @@ fn render_multipart(message: Message) {
       "multipart/mixed; boundary=\"" <> boundary <> "\"",
     )
 
-  let assert Some(attachments) = message.attachments
+  use attachments <- result.try(
+    message.attachments |> option.to_result(MissingAttachments),
+  )
   let content =
     "--"
     <> boundary
@@ -84,15 +97,17 @@ fn render_multipart(message: Message) {
     <> boundary
     <> "--\r\n"
 
+  use headers <- result.try(get_headers(message))
+
   let headers =
-    get_headers(message)
+    headers
     |> list.map(fn(header) { header.0 <> ": " <> header.1 })
     |> string.join("\r\n")
 
-  headers <> "\r\n" <> content <> "\r\n."
+  Ok(headers <> "\r\n" <> content <> "\r\n.")
 }
 
-fn render_attachment(boundary: String, attachment: Attachment) {
+fn render_attachment(boundary: String, attachment: Attachment) -> String {
   "--"
   <> boundary
   <> "\r\nContent-Type: "
@@ -105,72 +120,53 @@ fn render_attachment(boundary: String, attachment: Attachment) {
   <> attachment.content
 }
 
-fn get_headers(message: Message) -> List(#(String, String)) {
+fn get_headers(
+  message: Message,
+) -> Result(List(#(String, String)), MessageCreationError) {
   let get = fn(name) { dict.get(message.headers, name) }
-  let optional = fn(name) {
-    case get(name) {
-      Ok(val) if val != "" -> Some(#(name, val))
-      _ -> None
-    }
-  }
+  let key = fn(value, name) { #(name, value) }
 
-  // Required fields have defaults
-  let required = fn(name, default) {
-    case get(name) {
-      Ok(val) if val != "" -> Some(#(name, val))
-      _ -> Some(#(name, default))
-    }
-  }
+  let date =
+    get("Date")
+    |> result.unwrap(current_date())
+    |> key("Date")
 
-  // Mandatory fields must be provided by the user
-  let mandatory = fn(name) {
-    case get(name) {
-      Ok(val) if val != "" -> Some(#(name, val))
-      _ -> panic as { "Missing required header: " <> name }
-    }
-  }
-
-  let recipient_field = fn(message: Message, recipient_type: RecipientType) {
-    case recipient_type {
-      CC ->
-        case message.cc {
-          [] -> None
-          _ -> Some(#("Cc", string.join(message.cc, ", ")))
-        }
-
-      To ->
-        case message.to {
-          [] -> panic as "Missing to field"
-          _ -> Some(#("To", string.join(message.to, ", ")))
-        }
-
-      _ -> None
-    }
-  }
-
-  list.filter(
-    [
-      required("Date", current_date()),
-      mandatory("From"),
-      recipient_field(message, To),
-      optional("Sender"),
-      recipient_field(message, CC),
-      optional("Subject"),
-      required("Content-Type", "text/plain"),
-    ],
-    fn(a) {
-      case a {
-        None -> False
-        Some(_) -> True
-      }
-    },
-  )
-  |> list.map(fn(a) {
-    case a {
-      Some(field) -> field
-      None -> panic
-    }
+  use from <- result.try(case get("From") {
+    Error(_) -> MissingFrom |> Error
+    Ok(value) -> #("From", value) |> Ok
   })
+
+  use recipient_to <- result.try(case message.to {
+    [] -> Error(MissingRecipientTo)
+    _ -> Ok(#("To", string.join(message.to, ", ")))
+  })
+
+  let sender = get("Sender") |> result.map(key(_, "Sender"))
+
+  let recipient_cc = case message.cc {
+    [] -> Error(Nil)
+    _ -> Ok(#("To", string.join(message.to, ", ")))
+  }
+
+  let subject = get("Subject") |> result.map(key(_, "Subject"))
+
+  let content_type =
+    get("Content-Type")
+    |> result.unwrap("text/plain")
+    |> key("Content-Type")
+
+  [
+    Ok(date),
+    Ok(from),
+    Ok(recipient_to),
+    sender,
+    recipient_cc,
+    subject,
+    Ok(content_type),
+  ]
+  // filter out missing optional headers
+  |> list.filter_map(fn(item) { item })
+  |> Ok
 }
 
 // Header setting functions
@@ -180,7 +176,7 @@ pub fn set_from(
   message: Message,
   sender_address address: String,
   sender_name name: Option(String),
-) {
+) -> Message {
   message |> set_header("From", format_address(address, name))
 }
 
@@ -191,7 +187,7 @@ pub fn add_recipient(
   message: Message,
   email: String,
   recipient_type: RecipientType,
-) {
+) -> Message {
   case recipient_type {
     To -> Message(..message, to: [email, ..message.to])
     CC -> Message(..message, cc: [email, ..message.cc])
@@ -200,7 +196,7 @@ pub fn add_recipient(
 }
 
 /// Set the message's subject line. Optional.
-pub fn set_subject(message: Message, subject: String) {
+pub fn set_subject(message: Message, subject: String) -> Message {
   message |> set_header("Subject", subject)
 }
 
@@ -212,7 +208,7 @@ pub fn set_sender(
   message: Message,
   sender_address address: String,
   sender_name name: Option(String),
-) {
+) -> Message {
   message |> set_header("Sender", format_address(address, name))
 }
 
@@ -220,19 +216,19 @@ pub fn set_sender(
 ///
 /// If this is not explicitly set, the current system time will be used automatically
 /// when the message is sent. This header indicates when the email was created.
-pub fn set_date(message: Message, date: String) {
+pub fn set_date(message: Message, date: String) -> Message {
   message |> set_header("Date", date)
 }
 
 // Content functions
 
-pub fn set_html(message: Message, html: String) {
+pub fn set_html(message: Message, html: String) -> Message {
   message
   |> set_header("Content-Type", "text/html")
   |> set_content(html)
 }
 
-pub fn set_text(message: Message, text: String) {
+pub fn set_text(message: Message, text: String) -> Message {
   message
   |> set_header("Content-Type", "text/plain")
   |> set_content(text)
@@ -240,11 +236,10 @@ pub fn set_text(message: Message, text: String) {
 
 pub fn add_attachment(
   message: Message,
-  path: String,
+  content: BitArray,
   name: String,
   content_type: String,
-) {
-  let assert Ok(content) = simplifile.read_bits(from: path)
+) -> Message {
   let content = bit_array.base64_encode(content, False)
 
   let attachment = Attachment(name:, content_type:, content:)
@@ -255,17 +250,17 @@ pub fn add_attachment(
   Message(..message, attachments: Some(attachments))
 }
 
-fn set_content(message: Message, text: String) {
+fn set_content(message: Message, text: String) -> Message {
   Message(..message, content: text)
 }
 
 // Utility functions
 
-fn set_header(message: Message, name: String, value: String) {
+fn set_header(message: Message, name: String, value: String) -> Message {
   Message(..message, headers: dict.insert(message.headers, name, value))
 }
 
-fn format_address(address: String, name: Option(String)) {
+fn format_address(address: String, name: Option(String)) -> String {
   case name {
     Some(name) -> {
       name <> " <" <> address <> ">"
@@ -275,7 +270,10 @@ fn format_address(address: String, name: Option(String)) {
 }
 
 @internal
-pub fn date_from_cal(date cal: calendar.Date, time time: calendar.TimeOfDay) {
+pub fn date_from_cal(
+  date cal: calendar.Date,
+  time time: calendar.TimeOfDay,
+) -> String {
   let month = {
     calendar.month_to_string(cal.month) |> string.slice(0, 3)
   }
@@ -312,7 +310,7 @@ pub fn date_from_cal(date cal: calendar.Date, time time: calendar.TimeOfDay) {
 }
 
 @internal
-pub fn day_of_week(day q: Int, month m: Int, year y: Int) {
+pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
   let y = case m < 3 {
     True -> y - 1
     False -> y
@@ -339,7 +337,7 @@ pub fn day_of_week(day q: Int, month m: Int, year y: Int) {
   }
 }
 
-fn current_date() {
+fn current_date() -> String {
   let now =
     timestamp.system_time() |> timestamp.to_calendar(duration.seconds(0))
 

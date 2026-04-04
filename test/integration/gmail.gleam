@@ -1,5 +1,7 @@
 import gcourier/message
 import gcourier/smtp
+import simplifile
+
 // Note: gleam/erlang removed get_line in v1.0.0
 import gleam/option.{None, Some}
 import gleam/string
@@ -20,8 +22,11 @@ pub fn main() {
     |> message.set_text(body)
 
   let msg = case attach {
-    "y" ->
-      msg |> message.add_attachment("./README.md", "README.md", "text/markdown")
+    "y" -> {
+      let assert Ok(content) = simplifile.read_bits("./README.md")
+
+      msg |> message.add_attachment(content, "README.md", "text/markdown")
+    }
 
     _ -> msg
   }
