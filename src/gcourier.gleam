@@ -1,10 +1,7 @@
 import gcourier/mug/mug
 import gleam/bit_array
 import gleam/dict.{type Dict}
-import gleam/erlang/process
 import gleam/float
-import gleam/hackney
-import gleam/http/request
 import gleam/int
 import gleam/io
 import gleam/list
@@ -14,57 +11,7 @@ import gleam/string
 import gleam/time/calendar
 import gleam/time/duration
 import gleam/time/timestamp
-import shellout
 import youid/uuid
-
-// dev server stuff -------------------------------------------------------------
-// TODO: move to dedicated package that gets run via `gleam run -m gcourier/dev_server`
-
-@external(erlang, "priv", "find_bin")
-fn find_bin(name: String) -> String
-
-/// Starts an SMTP server that captures outgoing mail and
-/// displays it in the browser. By default, the server runs on localhost:1025, 
-/// and the UI runs on localhost:8025. It accepts username and password combination.
-pub fn dev_server() {
-  let assert Ok(req) = request.to("http://localhost:8025")
-  let resp = req |> hackney.send
-  case resp {
-    Error(_) -> {
-      let binary = find_bin("mailpit")
-      process.spawn(fn() {
-        shellout.command(
-          run: binary,
-          with: ["--smtp-auth-accept-any", "--smtp-auth-allow-insecure"],
-          in: ".",
-          opt: [],
-        )
-      })
-
-      check_live()
-      Nil
-    }
-    Ok(_) -> {
-      io.println("Successfully started SMTP server on localhost:1025.")
-      io.println("Running web UI at http://localhost:8025.")
-      Nil
-    }
-  }
-}
-
-fn check_live() {
-  let assert Ok(req) = request.to("http://localhost:8025")
-  let resp = req |> hackney.send
-  case resp {
-    Error(_) -> {
-      process.sleep(1000)
-      check_live()
-    }
-    Ok(_) -> {
-      True
-    }
-  }
-}
 
 // messages ---------------------------------------------------------------------
 
@@ -309,7 +256,7 @@ fn set_content(message: Message, text: String) -> Message {
   Message(..message, content: text)
 }
 
-// Utility functions
+// Utility functions ------------------------------------------------------------
 
 fn set_header(message: Message, name: String, value: String) -> Message {
   Message(..message, headers: dict.insert(message.headers, name, value))
@@ -324,8 +271,7 @@ fn format_address(address: String, name: Option(String)) -> String {
   }
 }
 
-@internal
-pub fn date_from_cal(
+fn date_from_cal(
   date cal: calendar.Date,
   time time: calendar.TimeOfDay,
 ) -> String {
@@ -364,8 +310,7 @@ pub fn date_from_cal(
   <> offset_minutes
 }
 
-@internal
-pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
+fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
   let y = case m < 3 {
     True -> y - 1
     False -> y

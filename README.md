@@ -54,3 +54,7 @@ Further documentation can be found at <https://hexdocs.pm/gcourier>.
 gleam run   # Run the project
 gleam test  # Run the tests
 ```
+
+### SMTP test server
+
+If you need an smtp server to test against, or have previously used `gcourier.dev_server` consider [mailpit](https://github.com/axllent/mailpit)
