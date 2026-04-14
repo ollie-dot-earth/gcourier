@@ -14,11 +14,10 @@ pub fn main() {
   let attach = input("Attach file? (y/N)")
 
   let msg =
-    gcourier.new_message()
-    |> gcourier.set_from(sender_email, None)
-    |> gcourier.add_recipient(recipient_email, gcourier.To)
+    gcourier.new_message(gcourier.Sender(sender_email, None))
+    |> gcourier.add_recipient(gcourier.To(recipient_email))
     |> gcourier.set_subject(subject)
-    |> gcourier.set_text(body)
+    |> gcourier.set_content(gcourier.Text(body))
 
   let msg = case attach {
     "y" -> {

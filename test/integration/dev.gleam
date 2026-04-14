@@ -11,12 +11,14 @@ fn test_regular() {
   // TODO: integrate with externally running mailpit
 
   let message =
-    gcourier.new_message()
-    |> gcourier.set_from("party@funclub.org", Some("The Fun Club 🎉"))
-    |> gcourier.add_recipient("jane.doe@example.com", gcourier.To)
-    |> gcourier.add_recipient("john.doe@example.net", gcourier.CC)
+    gcourier.new_message(gcourier.Sender(
+      "party@funclub.org",
+      Some("The Fun Club 🎉"),
+    ))
+    |> gcourier.add_recipient(gcourier.To("jane.doe@example.com"))
+    |> gcourier.add_recipient(gcourier.Cc("john.doe@example.net"))
     |> gcourier.set_subject("You're Invited: Pizza & Ping Pong Night!")
-    |> gcourier.set_html(
+    |> gcourier.set_content(gcourier.Html(
       "
         <html>
             <body>
@@ -29,7 +31,7 @@ fn test_regular() {
             </body>
         </html>
     ",
-    )
+    ))
 
   // Send the email
   // Navigate to localhost:8025 to view it in the browser.

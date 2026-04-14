@@ -1,127 +1,102 @@
 import birdie
 import gcourier
-import gleam/dict
 import gleam/option.{None, Some}
 import gleam/time/calendar
 import gleeunit/should
 
-pub fn from_address_test() {
-  let msg =
-    gcourier.new_message()
-    |> gcourier.set_from("test@example.com", Some("Test User"))
-
-  let assert Ok(from) = dict.get(msg.headers, "From")
-  from |> should.equal("Test User <test@example.com>")
-
-  let msg =
-    gcourier.new_message() |> gcourier.set_from("test@example.com", None)
-
-  let assert Ok(from) = dict.get(msg.headers, "From")
-  from |> should.equal("test@example.com")
+fn consistent_time(message: gcourier.Message) -> gcourier.Message {
+  message
+  |> gcourier.set_date_time(
+    calendar.Date(year: 2026, month: calendar.April, day: 14),
+    calendar.TimeOfDay(hours: 20, minutes: 26, seconds: 23, nanoseconds: 1),
+  )
 }
 
-pub fn sender_header_test() {
-  let msg =
-    gcourier.new_message()
-    |> gcourier.set_sender("sender@example.com", Some("Sender Name"))
+pub fn from_address_test() -> Nil {
+  gcourier.new_message(gcourier.Sender("test@example.com", Some("Test User")))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("from: Test User <test@example.com>")
 
-  dict.get(msg.headers, "Sender")
-  |> should.equal(Ok("Sender Name <sender@example.com>"))
+  gcourier.new_message(gcourier.Sender("test@example.com", None))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("from: <test@example.com>")
 }
 
-pub fn recipients_test() {
-  let msg =
-    gcourier.new_message()
-    |> gcourier.set_from("from@example.com", None)
-    |> gcourier.add_recipient("to@example.com", gcourier.To)
-    |> gcourier.add_recipient("cc@example.com", gcourier.CC)
-    |> gcourier.add_recipient("bcc@example.com", gcourier.BCC)
-    |> gcourier.add_recipient("to2@example.com", gcourier.To)
-    |> gcourier.add_recipient("cc2@example.com", gcourier.CC)
-    |> gcourier.add_recipient("bcc2@example.com", gcourier.BCC)
-    |> gcourier.set_date_time(
-      calendar.Date(year: 2026, month: calendar.April, day: 14),
-      calendar.TimeOfDay(hours: 20, minutes: 26, seconds: 23, nanoseconds: 1),
-    )
-
-  let assert Ok(rendered) = gcourier.render(msg)
-
-  birdie.snap(rendered, "to, cc, bcc, to2, cc2, bcc2")
+pub fn sender_header_test() -> Nil {
+  gcourier.new_message(gcourier.Sender("test@example.com", Some("Test User")))
+  |> consistent_time()
+  |> gcourier.set_sender(gcourier.Sender(
+    "sender@example.com",
+    Some("Sender Name"),
+  ))
+  |> gcourier.render()
+  |> birdie.snap(
+    "from: Test User <test@example.com> | sender: Sender Name <sender@example.com>",
+  )
 }
 
-pub fn subject_test() {
-  let msg =
-    gcourier.new_message()
-    |> gcourier.set_subject("Test Subject")
-
-  dict.get(msg.headers, "Subject")
-  |> should.equal(Ok("Test Subject"))
+pub fn recipients_test() -> Nil {
+  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  |> gcourier.add_recipient(gcourier.To("to@example.com"))
+  |> gcourier.add_recipient(gcourier.Cc("cc@example.com"))
+  |> gcourier.add_recipient(gcourier.Bcc("bcc@example.com"))
+  |> gcourier.add_recipient(gcourier.To("to2@example.com"))
+  |> gcourier.add_recipient(gcourier.Cc("cc2@example.com"))
+  |> gcourier.add_recipient(gcourier.Bcc("bcc2@example.com"))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("to, cc, bcc, to2, cc2, bcc2")
 }
 
-pub fn content_type_test() {
-  let msg = gcourier.new_message()
-  dict.get(msg.headers, "Content-Type") |> should.be_error()
-
-  let text_msg =
-    gcourier.new_message()
-    |> gcourier.set_text("Test message")
-
-  dict.get(text_msg.headers, "Content-Type")
-  |> should.equal(Ok("text/plain"))
-
-  let html_msg =
-    gcourier.new_message()
-    |> gcourier.set_html("<p>Test HTML</p>")
-
-  dict.get(html_msg.headers, "Content-Type")
-  |> should.equal(Ok("text/html"))
-
-  html_msg.content
-  |> should.equal("<p>Test HTML</p>")
+pub fn subject_test() -> Nil {
+  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  |> gcourier.set_subject("Test Subject")
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("Test Subject")
 }
 
-pub fn render_headers_test() {
-  let msg =
-    gcourier.new_message()
-    |> gcourier.set_from("from@example.com", None)
-    |> gcourier.add_recipient("to@example.com", gcourier.To)
-    |> gcourier.set_subject("Test Subject")
-    |> gcourier.set_text("Hello world")
-    |> gcourier.set_date_time(
-      calendar.Date(year: 2026, month: calendar.April, day: 14),
-      calendar.TimeOfDay(hours: 20, minutes: 26, seconds: 23, nanoseconds: 1),
-    )
+pub fn content_type_test() -> Nil {
+  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("No content, Content-Type 'text/plain'")
 
-  let assert Ok(rendered) = gcourier.render(msg)
+  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  |> gcourier.set_content(gcourier.Text("Test text"))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("Content 'Test text', Content-Type 'text/plain'")
 
-  birdie.snap(rendered, "Example headers: from, to, subject, text")
+  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  |> gcourier.set_content(gcourier.Html("<p>Test HTML</p>"))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("Content '<p>Test HTML</p>', Content-Type 'text/html'")
 }
 
-pub fn missing_from_test() {
-  let msg =
-    gcourier.new_message()
-    |> gcourier.add_recipient("to@example.com", gcourier.To)
-    |> gcourier.set_subject("Test Subject")
-    |> gcourier.set_text("Hello world")
-
-  let rendered = gcourier.render(msg)
-
-  assert rendered == Error(gcourier.MissingFrom)
+pub fn render_headers_test() -> Nil {
+  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  |> gcourier.add_recipient(gcourier.To("to@example.com"))
+  |> gcourier.set_subject("Test Subject")
+  |> gcourier.set_content(gcourier.Text("Hello world"))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("Example headers: from, to, subject, text")
 }
 
-pub fn missing_to_test() {
-  let msg =
-    gcourier.new_message()
-    |> gcourier.set_from("from@example.com", None)
-    |> gcourier.set_subject("Test Subject")
-    |> gcourier.set_text("Hello world")
-
-  let rendered = gcourier.render(msg)
-
-  assert rendered == Error(gcourier.MissingRecipientTo)
+pub fn missing_to_test() -> Nil {
+  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  |> gcourier.set_subject("Test Subject")
+  |> gcourier.set_content(gcourier.Text("Hello world"))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("From example with subject and text, but no 'To:'")
 }
 
-pub fn week_day_test() {
+pub fn week_day_test() -> Nil {
   // Basic tests for each day of the week
   gcourier.day_of_week(10, 5, 2025) |> should.equal("Sat")
   gcourier.day_of_week(11, 5, 2025) |> should.equal("Sun")

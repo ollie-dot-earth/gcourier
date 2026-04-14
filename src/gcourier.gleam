@@ -1,6 +1,5 @@
 import gcourier/mug/mug
 import gleam/bit_array
-import gleam/dict.{type Dict}
 import gleam/float
 import gleam/int
 import gleam/io
@@ -26,68 +25,97 @@ pub type Attachment {
   Attachment(name: String, content_type: String, content: String)
 }
 
-pub type Message {
-  Message(
-    headers: Dict(String, String),
-    to: List(String),
-    cc: List(String),
-    bcc: List(String),
-    content: String,
-    attachments: Option(List(Attachment)),
+pub opaque type Message {
+  /// primary_recipient ***HAS*** to contain at least one 
+  /// done in `new_message`
+  Simple(data: MessageData)
+  MultiPart(data: MessageData, attachments: List(Attachment))
+}
+
+type MessageData {
+  MessageData(
+    // must haves ---------------------------------------------------------------
+    from: Sender,
+    content: Content,
+    // optional -----------------------------------------------------------------
+    subject: Option(String),
+    content_type_override: Option(String),
+    to: List(Recipient),
+    cc: List(Recipient),
+    bcc: List(Recipient),
+    date: Option(#(calendar.Date, calendar.TimeOfDay)),
+    sender: Option(Sender),
   )
 }
 
-pub type RecipientType {
-  To
-  CC
-  BCC
+pub type Recipient {
+  To(address: String)
+  Cc(address: String)
+  Bcc(address: String)
 }
 
-pub fn new_message() -> Message {
-  Message(dict.from_list([]), [], [], [], "", None)
+pub type Sender {
+  Sender(address: String, name: Option(String))
 }
 
-pub fn render(message: Message) -> Result(String, MessageCreationError) {
-  case message.attachments {
-    Some(_) -> render_multipart(message)
-    None -> render_single(message)
+pub type Content {
+  Text(text: String)
+  Html(text: String)
+}
+
+fn content_type(content: Content) {
+  case content {
+    Text(text: _) -> "text/plain"
+    Html(text: _) -> "text/html"
   }
 }
 
-fn render_single(message: Message) -> Result(String, MessageCreationError) {
-  use headers <- result.try(get_headers(message))
-
-  let headers =
-    headers
-    |> list.map(fn(header) { header.0 <> ": " <> header.1 })
-    |> string.join("\r\n")
-
-  Ok(headers <> "\r\n\r\n" <> message.content <> "\r\n.")
+pub fn new_message(from from: Sender) -> Message {
+  Simple(data: MessageData(
+    from:,
+    content: Text(""),
+    subject: None,
+    to: [],
+    cc: [],
+    bcc: [],
+    date: None,
+    content_type_override: None,
+    sender: None,
+  ))
 }
 
-fn render_multipart(message: Message) -> Result(String, MessageCreationError) {
+@internal
+pub fn render(message: Message) {
+  case message {
+    Simple(data:) -> render_single(data)
+    MultiPart(data:, attachments:) -> render_multipart(data, attachments)
+  }
+}
+
+fn render_single(message: MessageData) {
+  let headers = format_headers(message)
+
+  headers <> "\r\n" <> message.content.text <> "\r\n."
+}
+
+fn render_multipart(message: MessageData, attachments: List(Attachment)) {
   let boundary = uuid.v4_string()
-  use body_ctype <- result.try(
-    dict.get(message.headers, "Content-Type")
-    |> result.replace_error(MissingContentTypeHeader),
-  )
+
   let message =
-    message
-    |> set_header(
-      "Content-Type",
-      "multipart/mixed; boundary=\"" <> boundary <> "\"",
+    MessageData(
+      ..message,
+      content_type_override: Some(
+        "multipart/mixed; boundary=\"" <> boundary <> "\"",
+      ),
     )
 
-  use attachments <- result.try(
-    message.attachments |> option.to_result(MissingAttachments),
-  )
   let content =
     "--"
     <> boundary
     <> "\r\nContent-Type: "
-    <> body_ctype
+    <> content_type(message.content)
     <> "\r\n\r\n"
-    <> message.content
+    <> message.content.text
     <> "\r\n"
     <> {
       list.map(list.reverse(attachments), fn(a) {
@@ -99,14 +127,9 @@ fn render_multipart(message: Message) -> Result(String, MessageCreationError) {
     <> boundary
     <> "--\r\n"
 
-  use headers <- result.try(get_headers(message))
+  let headers = format_headers(message)
 
-  let headers =
-    headers
-    |> list.map(fn(header) { header.0 <> ": " <> header.1 })
-    |> string.join("\r\n")
-
-  Ok(headers <> "\r\n" <> content <> "\r\n.")
+  headers <> "\r\n" <> content <> "\r\n."
 }
 
 fn render_attachment(boundary: String, attachment: Attachment) -> String {
@@ -122,96 +145,83 @@ fn render_attachment(boundary: String, attachment: Attachment) -> String {
   <> attachment.content
 }
 
-fn get_headers(
-  message: Message,
-) -> Result(List(#(String, String)), MessageCreationError) {
-  let get = fn(name) { dict.get(message.headers, name) }
-  let key = fn(value, name) { #(name, value) }
+fn format_headers(message: MessageData) {
+  let with_key = fn(key, value) { key <> ": " <> value <> "\r\n" }
 
-  let date =
-    get("Date")
-    |> result.unwrap(current_date())
-    |> key("Date")
-
-  use from <- result.try(case get("From") {
-    Error(_) -> MissingFrom |> Error
-    Ok(value) -> #("From", value) |> Ok
-  })
-
-  use recipient_to <- result.try(case message.to {
-    [] -> Error(MissingRecipientTo)
-    _ -> Ok(#("To", string.join(message.to, ", ")))
-  })
-
-  let sender = get("Sender") |> result.map(key(_, "Sender"))
-
-  let recipient_cc = case message.cc {
-    [] -> Error(Nil)
-    _ -> Ok(#("To", string.join(message.to, ", ")))
+  let optional_with_key = fn(key, optional_value) {
+    case optional_value {
+      Some(value) -> with_key(key, value)
+      None -> ""
+    }
   }
 
-  let subject = get("Subject") |> result.map(key(_, "Subject"))
+  let optional_list_with_key = fn(
+    key: String,
+    list: List(a),
+    transform: fn(a) -> String,
+  ) -> String {
+    case list {
+      [] -> ""
+      [_, ..] ->
+        key <> ": " <> list.map(list, transform) |> string.join(", ") <> "\r\n"
+    }
+  }
 
-  let content_type =
-    get("Content-Type")
-    |> result.unwrap("text/plain")
-    |> key("Content-Type")
+  let format_sender = fn(sender: Sender) {
+    format_address(sender.address, sender.name)
+  }
 
-  [
-    Ok(date),
-    Ok(from),
-    Ok(recipient_to),
-    sender,
-    recipient_cc,
-    subject,
-    Ok(content_type),
-  ]
-  // filter out missing optional headers
-  |> list.filter_map(fn(item) { item })
-  |> Ok
+  let _ =
+    with_key(
+      "Date",
+      message.date
+        |> option.unwrap(current_date())
+        |> fn(date_time) { date_from_cal(date_time.0, date_time.1) },
+    )
+    <> with_key("From", format_address(message.from.address, message.from.name))
+    <> optional_list_with_key("To", message.to, fn(item) { item.address })
+    <> optional_with_key("Sender", message.sender |> option.map(format_sender))
+    <> optional_list_with_key("Cc", message.cc, fn(item) { item.address })
+    <> optional_list_with_key("Bcc", message.bcc, fn(item) { item.address })
+    <> optional_with_key("Subject", message.subject)
+    <> with_key(
+      "Content-Type",
+      message.content_type_override
+        |> option.unwrap(message.content |> content_type()),
+    )
 }
 
 // Header setting functions
 
-/// Set the FROM header in the email.
-pub fn set_from(
-  message: Message,
-  sender_address address: String,
-  sender_name name: Option(String),
-) -> Message {
-  message |> set_header("From", format_address(address, name))
-}
-
 /// Add the provided address to the list of recipients.
 /// 
 /// recipient_type should be one of To, Cc, or Bcc.
-pub fn add_recipient(
-  message: Message,
-  email: String,
-  recipient_type: RecipientType,
-) -> Message {
-  case recipient_type {
-    To -> Message(..message, to: [email, ..message.to])
-    CC -> Message(..message, cc: [email, ..message.cc])
-    BCC -> Message(..message, bcc: [email, ..message.bcc])
+pub fn add_recipient(message: Message, recipient: Recipient) -> Message {
+  case recipient {
+    To(_) -> MessageData(..message.data, to: [recipient, ..message.data.to])
+    Cc(_) -> MessageData(..message.data, cc: [recipient, ..message.data.cc])
+    Bcc(_) -> MessageData(..message.data, bcc: [recipient, ..message.data.bcc])
   }
+  |> update_message_data(message, _)
 }
 
 /// Set the message's subject line. Optional.
 pub fn set_subject(message: Message, subject: String) -> Message {
-  message |> set_header("Subject", subject)
+  update_message_data(
+    message,
+    MessageData(..message.data, subject: Some(subject)),
+  )
 }
 
-/// Set the _optional_ sender header. Prefer FROM in most cases.
+/// Set the _optional_ sender header. 
 /// 
 /// This field is useful when the email is sent on behalf of 
 /// a third party or there are multiple emails in the FROM field.
-pub fn set_sender(
-  message: Message,
-  sender_address address: String,
-  sender_name name: Option(String),
-) -> Message {
-  message |> set_header("Sender", format_address(address, name))
+pub fn set_sender(message: Message, sender: Sender) -> Message {
+  update_message_data(
+    message,
+    MessageData(..message.data, sender: Some(sender)),
+  )
 }
 
 /// Set the Date header for the email. Optional.
@@ -223,23 +233,24 @@ pub fn set_date_time(
   date: calendar.Date,
   time: calendar.TimeOfDay,
 ) -> Message {
-  message |> set_header("Date", date_from_cal(date, time))
+  update_message_data(
+    message,
+    MessageData(..message.data, date: Some(#(date, time))),
+  )
 }
 
 // Content functions
 
-pub fn set_html(message: Message, html: String) -> Message {
-  message
-  |> set_header("Content-Type", "text/html")
-  |> set_content(html)
+/// set the content of a message
+///
+/// there can only be one content set. i.e. a second usage of this function will overwrite the first
+///
+pub fn set_content(message: Message, content: Content) {
+  update_message_data(message, MessageData(..message.data, content:))
 }
 
-pub fn set_text(message: Message, text: String) -> Message {
-  message
-  |> set_header("Content-Type", "text/plain")
-  |> set_content(text)
-}
-
+/// add an attachment to a message
+///
 pub fn add_attachment(
   message: Message,
   content: BitArray,
@@ -249,21 +260,21 @@ pub fn add_attachment(
   let content = bit_array.base64_encode(content, False)
 
   let attachment = Attachment(name:, content_type:, content:)
-  let attachments = case message.attachments {
-    None -> [attachment]
-    Some(a) -> [attachment, ..a]
-  }
-  Message(..message, attachments: Some(attachments))
-}
 
-fn set_content(message: Message, text: String) -> Message {
-  Message(..message, content: text)
+  case message {
+    Simple(data:) -> MultiPart(data:, attachments: [attachment])
+    MultiPart(data:, attachments:) ->
+      MultiPart(data:, attachments: [attachment, ..attachments])
+  }
 }
 
 // Utility functions ------------------------------------------------------------
 
-fn set_header(message: Message, name: String, value: String) -> Message {
-  Message(..message, headers: dict.insert(message.headers, name, value))
+fn update_message_data(message: Message, data: MessageData) {
+  case message {
+    Simple(..) -> Simple(data:)
+    MultiPart(..) -> MultiPart(..message, data:)
+  }
 }
 
 fn format_address(address: String, name: Option(String)) -> String {
@@ -341,11 +352,9 @@ pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
   }
 }
 
-fn current_date() -> String {
-  let now =
-    timestamp.system_time() |> timestamp.to_calendar(duration.seconds(0))
-
-  date_from_cal(now.0, now.1)
+fn current_date() {
+  timestamp.system_time()
+  |> timestamp.to_calendar(duration.seconds(0))
 }
 
 // message sending --------------------------------------------------------------
@@ -366,7 +375,6 @@ pub type Error {
   InvalidUtf8Response(BitArray)
   FailedToSend(mug.Error)
   FailedToUpgrade(mug.Error)
-  FailedToCreateMessage(MessageCreationError)
 }
 
 pub fn send(
@@ -400,8 +408,8 @@ fn send_smtp(mailer: Mailer, msg: Message) {
   use _ <- result.try(socket_receive(socket))
 
   let rcpt =
-    list.map(msg.to, fn(r) {
-      let to_cmd = "RCPT TO:<" <> r <> ">"
+    list.map(msg.data.to, fn(recipient) {
+      let to_cmd = "RCPT TO:<" <> recipient.address <> ">"
       use _ <- result.try(socket_send_checked(socket, to_cmd))
       socket_receive(socket)
     })
@@ -411,10 +419,7 @@ fn send_smtp(mailer: Mailer, msg: Message) {
   use _ <- result.try(socket_send_checked(socket, "DATA"))
   use _ <- result.try(socket_receive(socket))
 
-  use message <- result.try(
-    render(msg) |> result.map_error(FailedToCreateMessage),
-  )
-
+  let message = render(msg)
   use _ <- result.try(socket_send_checked(socket, message))
   use _ <- result.try(socket_receive(socket))
 
