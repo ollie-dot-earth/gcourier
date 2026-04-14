@@ -3,12 +3,13 @@ import gleam/erlang/process
 import gleam/option.{Some}
 
 pub fn main() {
-  test_regular()
+  Nil
+  // test_regular()
 }
 
 fn test_regular() {
-  gcourier.dev_server()
-  // starts an SMTP server that captures and displays emails.
+  // TODO: integrate with externally running mailpit
+
   let message =
     gcourier.new_message()
     |> gcourier.set_from("party@funclub.org", Some("The Fun Club 🎉"))

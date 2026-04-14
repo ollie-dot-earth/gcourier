@@ -218,8 +218,12 @@ pub fn set_sender(
 ///
 /// If this is not explicitly set, the current system time will be used automatically
 /// when the message is sent. This header indicates when the email was created.
-pub fn set_date(message: Message, date: String) -> Message {
-  message |> set_header("Date", date)
+pub fn set_date_time(
+  message: Message,
+  date: calendar.Date,
+  time: calendar.TimeOfDay,
+) -> Message {
+  message |> set_header("Date", date_from_cal(date, time))
 }
 
 // Content functions
@@ -310,7 +314,7 @@ fn date_from_cal(
   <> offset_minutes
 }
 
-fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
+pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
   let y = case m < 3 {
     True -> y - 1
     False -> y

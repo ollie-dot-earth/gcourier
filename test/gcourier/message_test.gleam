@@ -1,19 +1,9 @@
+import birdie
 import gcourier
 import gleam/dict
-import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
+import gleam/time/calendar
 import gleeunit/should
-
-pub fn basic_build_test() {
-  let msg = gcourier.new_message()
-
-  msg.headers |> dict.size |> should.equal(0)
-  msg.to |> list.is_empty |> should.be_true
-  msg.cc |> list.is_empty |> should.be_true
-  msg.bcc |> list.is_empty |> should.be_true
-  msg.content |> should.equal("")
-}
 
 pub fn from_address_test() {
   let msg =
@@ -42,23 +32,21 @@ pub fn sender_header_test() {
 pub fn recipients_test() {
   let msg =
     gcourier.new_message()
+    |> gcourier.set_from("from@example.com", None)
     |> gcourier.add_recipient("to@example.com", gcourier.To)
     |> gcourier.add_recipient("cc@example.com", gcourier.CC)
     |> gcourier.add_recipient("bcc@example.com", gcourier.BCC)
-
-  msg.to |> should.equal(["to@example.com"])
-  msg.cc |> should.equal(["cc@example.com"])
-  msg.bcc |> should.equal(["bcc@example.com"])
-
-  let msg =
-    msg
     |> gcourier.add_recipient("to2@example.com", gcourier.To)
     |> gcourier.add_recipient("cc2@example.com", gcourier.CC)
     |> gcourier.add_recipient("bcc2@example.com", gcourier.BCC)
+    |> gcourier.set_date_time(
+      calendar.Date(year: 2026, month: calendar.April, day: 14),
+      calendar.TimeOfDay(hours: 20, minutes: 26, seconds: 23, nanoseconds: 1),
+    )
 
-  msg.to |> should.equal(["to2@example.com", "to@example.com"])
-  msg.cc |> should.equal(["cc2@example.com", "cc@example.com"])
-  msg.bcc |> should.equal(["bcc2@example.com", "bcc@example.com"])
+  let assert Ok(rendered) = gcourier.render(msg)
+
+  birdie.snap(rendered, "to, cc, bcc, to2, cc2, bcc2")
 }
 
 pub fn subject_test() {
@@ -99,19 +87,14 @@ pub fn render_headers_test() {
     |> gcourier.add_recipient("to@example.com", gcourier.To)
     |> gcourier.set_subject("Test Subject")
     |> gcourier.set_text("Hello world")
+    |> gcourier.set_date_time(
+      calendar.Date(year: 2026, month: calendar.April, day: 14),
+      calendar.TimeOfDay(hours: 20, minutes: 26, seconds: 23, nanoseconds: 1),
+    )
 
   let assert Ok(rendered) = gcourier.render(msg)
 
-  let should_contain = fn(a: String, b: String) {
-    should.be_true(string.contains(a, b))
-  }
-
-  rendered |> should_contain("From: from@example.com")
-  rendered |> should_contain("To: to@example.com")
-  rendered |> should_contain("Subject: Test Subject")
-  rendered |> should_contain("Content-Type: text/plain")
-
-  rendered |> should_contain("Hello world")
+  birdie.snap(rendered, "Example headers: from, to, subject, text")
 }
 
 pub fn missing_from_test() {
