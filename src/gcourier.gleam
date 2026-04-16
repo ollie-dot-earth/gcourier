@@ -63,7 +63,7 @@ pub type Content {
   Html(text: String)
 }
 
-fn content_type(content: Content) {
+fn content_type(content: Content) -> String {
   case content {
     Text(text: _) -> "text/plain"
     Html(text: _) -> "text/html"
@@ -85,20 +85,23 @@ pub fn new_message(from from: Sender) -> Message {
 }
 
 @internal
-pub fn render(message: Message) {
+pub fn render(message: Message) -> String {
   case message {
     Simple(data:) -> render_single(data)
     MultiPart(data:, attachments:) -> render_multipart(data, attachments)
   }
 }
 
-fn render_single(message: MessageData) {
+fn render_single(message: MessageData) -> String {
   let headers = format_headers(message)
 
   headers <> "\r\n" <> message.content.text <> "\r\n."
 }
 
-fn render_multipart(message: MessageData, attachments: List(Attachment)) {
+fn render_multipart(
+  message: MessageData,
+  attachments: List(Attachment),
+) -> String {
   let boundary = uuid.v4_string()
 
   let message =
@@ -145,7 +148,7 @@ fn render_attachment(boundary: String, attachment: Attachment) -> String {
   <> attachment.content
 }
 
-fn format_headers(message: MessageData) {
+fn format_headers(message: MessageData) -> String {
   let with_key = fn(key, value) { key <> ": " <> value <> "\r\n" }
 
   let optional_with_key = fn(key, optional_value) {
@@ -245,7 +248,7 @@ pub fn set_date_time(
 ///
 /// there can only be one content set. i.e. a second usage of this function will overwrite the first
 ///
-pub fn set_content(message: Message, content: Content) {
+pub fn set_content(message: Message, content: Content) -> Message {
   update_message_data(message, MessageData(..message.data, content:))
 }
 
@@ -270,7 +273,7 @@ pub fn add_attachment(
 
 // Utility functions ------------------------------------------------------------
 
-fn update_message_data(message: Message, data: MessageData) {
+fn update_message_data(message: Message, data: MessageData) -> Message {
   case message {
     Simple(..) -> Simple(data:)
     MultiPart(..) -> MultiPart(..message, data:)
@@ -352,7 +355,7 @@ pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
   }
 }
 
-fn current_date() {
+fn current_date() -> #(calendar.Date, calendar.TimeOfDay) {
   timestamp.system_time()
   |> timestamp.to_calendar(duration.seconds(0))
 }
@@ -382,7 +385,7 @@ pub fn send(
   port: Int,
   auth: Option(#(String, String)),
   message: Message,
-) {
+) -> Result(Nil, Error) {
   let mailer = case auth {
     Some(#(username, password)) ->
       SmtpMailer(host:, port:, username:, password:, auth: True)
@@ -392,7 +395,7 @@ pub fn send(
   send_smtp(mailer, message)
 }
 
-fn send_smtp(mailer: Mailer, msg: Message) {
+fn send_smtp(mailer: Mailer, msg: Message) -> Result(Nil, Error) {
   use socket <- result.try(
     connect_smtp(SmtpMailer(
       host: mailer.host,
