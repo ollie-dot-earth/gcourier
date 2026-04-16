@@ -17,14 +17,15 @@ import gleam/erlang/process
 import gleam/option.{Some}
 
 pub fn main() {
-  gcourier.dev_server() // starts an SMTP server that captures and displays emails.
   let message =
-    message.build()
-    |> message.set_from("party@funclub.org", Some("The Fun Club 🎉"))
-    |> message.add_recipient("jane.doe@example.com", message.To)
-    |> message.add_recipient("john.doe@example.net", message.CC)
-    |> message.set_subject("You're Invited: Pizza & Ping Pong Night!")
-    |> message.set_html(
+    gcourier.new_message(gcourier.Sender(
+      "party@funclub.org",
+      Some("The Fun Club 🎉"),
+    ))
+    |> gcourier.add_recipient(gcourier.To("jane.doe@example.com"))
+    |> gcourier.add_recipient(gcourier.Cc("john.doe@example.net"))
+    |> gcourier.set_subject("You're Invited: Pizza & Ping Pong Night!")
+    |> gcourier.set_content(gcourier.Html(
       "
         <html>
             <body>
@@ -37,11 +38,12 @@ pub fn main() {
             </body>
         </html>
     ",
-    )
+    ))
 
   // Send the email
   // Navigate to localhost:8025 to view it in the browser.
-  smtp.send("localhost", 1025, Some(#("user1", "password1")), message)
+  let assert Ok(_) =
+    gcourier.send("localhost", 1025, Some(#("user1", "password1")), message)
   process.sleep_forever()
 }
 ```
