@@ -4,7 +4,7 @@ title: Content '<p>Test HTML</p>', Content-Type 'text/html'
 file: ./test/gcourier/message_test.gleam
 test_name: content_type_test
 ---
-Date: Tue, 14 Apr 2026 20:26:23 +02:00
+Date: Tue, 14 Apr 2026 20:26:23 00:00
 From: from@example.com
 Content-Type: text/html
 

@@ -2,14 +2,16 @@ import birdie
 import gcourier
 import gleam/option.{None, Some}
 import gleam/time/calendar
+import gleam/time/timestamp
 import gleeunit/should
 
 fn consistent_time(message: gcourier.Message) -> gcourier.Message {
   message
-  |> gcourier.set_date_time(
+  |> gcourier.set_timestamp(timestamp.from_calendar(
     calendar.Date(year: 2026, month: calendar.April, day: 14),
     calendar.TimeOfDay(hours: 20, minutes: 26, seconds: 23, nanoseconds: 1),
-  )
+    calendar.utc_offset,
+  ))
 }
 
 pub fn from_address_test() -> Nil {

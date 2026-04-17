@@ -43,7 +43,7 @@ type MessageData {
     to: List(Recipient),
     cc: List(Recipient),
     bcc: List(Recipient),
-    date: Option(#(calendar.Date, calendar.TimeOfDay)),
+    timestamp: Option(timestamp.Timestamp),
     sender: Option(Sender),
   )
 }
@@ -78,7 +78,7 @@ pub fn new_message(from from: Sender) -> Message {
     to: [],
     cc: [],
     bcc: [],
-    date: None,
+    timestamp: None,
     content_type_override: None,
     sender: None,
   ))
@@ -177,9 +177,9 @@ fn format_headers(message: MessageData) -> String {
   let _ =
     with_key(
       "Date",
-      message.date
-        |> option.unwrap(current_date())
-        |> fn(date_time) { date_from_cal(date_time.0, date_time.1) },
+      message.timestamp
+        |> option.unwrap(timestamp.system_time())
+        |> date_from_timestamp(),
     )
     <> with_key("From", format_address(message.from.address, message.from.name))
     <> optional_list_with_key("To", message.to, fn(item) { item.address })
@@ -231,14 +231,14 @@ pub fn set_sender(message: Message, sender: Sender) -> Message {
 ///
 /// If this is not explicitly set, the current system time will be used automatically
 /// when the message is sent. This header indicates when the email was created.
-pub fn set_date_time(
+///
+pub fn set_timestamp(
   message: Message,
-  date: calendar.Date,
-  time: calendar.TimeOfDay,
+  timestamp: timestamp.Timestamp,
 ) -> Message {
   update_message_data(
     message,
-    MessageData(..message.data, date: Some(#(date, time))),
+    MessageData(..message.data, timestamp: Some(timestamp)),
   )
 }
 
@@ -289,15 +289,14 @@ fn format_address(address: String, name: Option(String)) -> String {
   }
 }
 
-fn date_from_cal(
-  date cal: calendar.Date,
-  time time: calendar.TimeOfDay,
-) -> String {
+fn date_from_timestamp(timestamp: timestamp.Timestamp) -> String {
+  let #(cal, time) = timestamp |> timestamp.to_calendar(calendar.utc_offset)
+
   let month = {
     calendar.month_to_string(cal.month) |> string.slice(0, 3)
   }
 
-  let offset = float.round(duration.to_seconds(calendar.local_offset()))
+  let offset = float.round(duration.to_seconds(calendar.utc_offset))
   let offset_sign = case offset > 0 {
     True -> "+"
     False -> ""
@@ -353,11 +352,6 @@ pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
     6 -> "Fri"
     _ -> panic
   }
-}
-
-fn current_date() -> #(calendar.Date, calendar.TimeOfDay) {
-  timestamp.system_time()
-  |> timestamp.to_calendar(duration.seconds(0))
 }
 
 // message sending --------------------------------------------------------------
