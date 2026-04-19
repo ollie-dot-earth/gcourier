@@ -34,10 +34,10 @@ pub opaque type Message {
 
 type MessageData {
   MessageData(
-    // must haves ---------------------------------------------------------------
+    // Required
     from: Sender,
     content: Content,
-    // optional -----------------------------------------------------------------
+    // Optional 
     subject: Option(String),
     content_type_override: Option(String),
     to: List(Recipient),
@@ -84,7 +84,6 @@ pub fn new_message(from from: Sender) -> Message {
   ))
 }
 
-@internal
 pub fn render(message: Message) -> String {
   case message {
     Simple(data:) -> render_single(data)
