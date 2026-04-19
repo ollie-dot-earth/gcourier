@@ -92,7 +92,7 @@ pub fn render(message: Message) -> String {
 fn render_single(message: MessageData) -> String {
   let headers = format_headers(message)
 
-  headers <> "\r\n" <> message.content.text <> "\r\n."
+  headers <> "\r\n" <> message.content.text
 }
 
 fn render_multipart(
@@ -129,7 +129,7 @@ fn render_multipart(
 
   let headers = format_headers(message)
 
-  headers <> "\r\n" <> content <> "\r\n."
+  headers <> "\r\n" <> content
 }
 
 fn render_attachment(boundary: String, attachment: Attachment) -> String {
@@ -387,39 +387,45 @@ fn send_smtp(mailer: Mailer, msg: Message) -> Result(Nil, Error) {
   )
 
   let from_cmd = "MAIL FROM:<" <> mailer.username <> ">"
-  use _ <- result.try(socket_send_checked(socket, from_cmd))
+  use _ <- result.try(socket_send(socket, from_cmd))
   use _ <- result.try(socket_receive(socket))
 
   let rcpt =
     list.map(msg.data.to, fn(recipient) {
       let to_cmd = "RCPT TO:<" <> recipient.address <> ">"
-      use _ <- result.try(socket_send_checked(socket, to_cmd))
+      use _ <- result.try(socket_send(socket, to_cmd))
       socket_receive(socket)
     })
     |> result.all()
   use _ <- result.try(rcpt)
 
-  use _ <- result.try(socket_send_checked(socket, "DATA"))
+  use _ <- result.try(socket_send(socket, "DATA"))
   use _ <- result.try(socket_receive(socket))
 
   let message = render(msg)
-  use _ <- result.try(socket_send_checked(socket, message))
+  use _ <- result.try(socket_send(socket, message))
   use _ <- result.try(socket_receive(socket))
 
-  use _ <- result.try(socket_send_checked(socket, "QUIT"))
+  // tell the server this message is done
+  use _ <- result.try(socket_send(socket, "\r\n."))
+  use _ <- result.try(socket_receive(socket))
+
+  // close the socket
+  use _ <- result.try(socket_send(socket, "QUIT"))
   use _ <- result.try(socket_receive(socket))
   Ok(Nil)
 }
 
-fn socket_send_checked(socket: mug.Socket, value: String) -> Result(Nil, Error) {
-  socket_send(socket, value)
-}
-
+/// sends a given message *with* "\r\n" appended
+///
 fn socket_send(socket: mug.Socket, value: String) -> Result(Nil, Error) {
   mug.send(socket, <<{ value <> "\r\n" }:utf8>>)
   |> result.map_error(FailedToSend)
 }
 
+/// receive one message from the socket
+/// and try to turn it into a string
+///
 fn socket_receive(socket: mug.Socket) -> Result(String, Error) {
   use packet <- result.try(
     mug.receive(socket, 5000) |> result.map_error(FailedToReceive),
@@ -449,7 +455,7 @@ fn connect_smtp(mailer: Mailer) -> Result(mug.Socket, Error) {
   let ehlo = case string.contains(helo_resp, "STARTTLS") {
     False -> #(helo_resp, socket) |> Ok
     True -> {
-      use _ <- result.try(socket_send_checked(socket, "STARTTLS"))
+      use _ <- result.try(socket_send(socket, "STARTTLS"))
       use _ <- result.try(
         mug.receive(socket, 5000) |> result.map_error(FailedToReceive),
       )
@@ -458,7 +464,7 @@ fn connect_smtp(mailer: Mailer) -> Result(mug.Socket, Error) {
         mug.upgrade(socket, mug.DangerouslyDisableVerification, 10_000)
         |> result.map_error(FailedToUpgrade),
       )
-      use _ <- result.try(socket_send_checked(socket, "EHLO " <> mailer.host))
+      use _ <- result.try(socket_send(socket, "EHLO " <> mailer.host))
       use resp <- result.try(socket_receive(socket))
       #(resp, socket) |> Ok
     }
@@ -487,10 +493,10 @@ fn auth_user(
       |> Ok
     }
     True -> {
-      use _ <- result.try(socket_send_checked(socket, "AUTH LOGIN"))
+      use _ <- result.try(socket_send(socket, "AUTH LOGIN"))
       use _ <- result.try(socket_receive(socket))
       // todo: check resp
-      use _ <- result.try(socket_send_checked(
+      use _ <- result.try(socket_send(
         socket,
         mailer.username
           |> bit_array.from_string()
@@ -498,7 +504,7 @@ fn auth_user(
       ))
 
       use _ <- result.try(socket_receive(socket))
-      use _ <- result.try(socket_send_checked(
+      use _ <- result.try(socket_send(
         socket,
         mailer.password
           |> bit_array.from_string()
