@@ -3,13 +3,10 @@ import gleam/erlang/process
 import gleam/option.{Some}
 
 pub fn main() {
-  Nil
-  // test_regular()
+  test_regular()
 }
 
 fn test_regular() {
-  // TODO: integrate with externally running mailpit
-
   let message =
     gcourier.new_message(gcourier.Address(
       Some("The Fun Club 🎉"),
@@ -33,9 +30,21 @@ fn test_regular() {
     ",
     ))
 
+  // start a new smtp mailer
+  let assert Ok(mailer) =
+    gcourier.start_smtp(
+      "localhost",
+      1025,
+      // Some(gcourier.Auth("user1", "password1")),
+      option.None,
+      gcourier.AllowNonTls,
+    )
+    as "did you start mailpit?"
+
   // Send the email
   // Navigate to localhost:8025 to view it in the browser.
-  let assert Ok(_) =
-    gcourier.send("localhost", 1025, Some(#("user1", "password1")), message)
-  process.sleep_forever()
+  let assert Ok(_) = gcourier.send(mailer, message)
+
+  // stop the mailer
+  let assert Ok(_) = gcourier.stop(mailer)
 }

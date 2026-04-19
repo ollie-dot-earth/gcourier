@@ -1,7 +1,7 @@
 import gcourier/mug/mug
 import gleam/bit_array
+import gleam/bool
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -340,56 +340,185 @@ pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
   }
 }
 
-// message sending --------------------------------------------------------------
-
-type Mailer {
-  SmtpMailer(
-    host: String,
-    port: Int,
-    username: String,
-    password: String,
-    auth: Bool,
-  )
-}
+// mailer agnostic --------------------------------------------------------------
 
 pub type Error {
+  // only happens during initial connection
+  ServerDoesntSupportAuthentication
+  ServerDoesntSupportTls
   FailedToConnect(mug.Error)
+  FailedToUpgrade(mug.Error)
+
+  // only happens during `stop`
+  FailedToClose(mug.Error)
+
+  // happens both during connection and message sending
   FailedToReceive(mug.Error)
   InvalidUtf8Response(BitArray)
   FailedToSend(mug.Error)
-  FailedToUpgrade(mug.Error)
+
+  // happens during sending 
+  /// `MAIL FROM:` got a response that wasnt the expected `250 OK`
+  ///
+  FailedToSendStart(String)
+  /// `DATA` got non 354 response
+  ///
+  NotAllowedToSendData(String)
+  /// finishing `<CRLF>.<CRLF>` got a non `250 OK` response
+  /// 
+  /// i.e. the connection is in an odd state and should probably be recreated
+  ///
+  FailedToFinishTransaction(String)
 }
 
-pub fn send(
-  host: String,
-  port: Int,
-  auth: Option(#(String, String)),
-  message: Message,
-) -> Result(Nil, Error) {
-  let mailer = case auth {
-    Some(#(username, password)) ->
-      SmtpMailer(host:, port:, username:, password:, auth: True)
-    None -> SmtpMailer(host:, port:, username: "", password: "", auth: False)
+pub opaque type Mailer {
+  Smtp(mug.Socket)
+}
+
+pub type Auth {
+  Auth(username: String, password: String)
+}
+
+pub type TlsStance {
+  AllowNonTls
+  RejectNonTls
+}
+
+/// send a message through a given mailer
+///
+pub fn send(mailer: Mailer, message: Message) -> Result(Nil, Error) {
+  case mailer {
+    Smtp(socket) -> send_smtp(socket, message)
   }
-
-  send_smtp(mailer, message)
 }
 
-fn send_smtp(mailer: Mailer, msg: Message) -> Result(Nil, Error) {
+/// stop a given mailer
+/// 
+pub fn stop(mailer: Mailer) -> Result(Nil, Error) {
+  case mailer {
+    Smtp(socket) -> {
+      // close the socket
+      use _ <- result.try(socket_send(socket, "QUIT"))
+      use _ <- result.try(socket_receive(socket))
+
+      mug.shutdown(socket) |> result.map_error(FailedToClose)
+    }
+  }
+}
+
+// smtp specific ----------------------------------------------------------------
+
+/// Start a new smtp mailer
+/// > Make sure to stop it using `gcourier.stop` once you are done with it
+///
+/// Connects to the server using the supplied host, port and auth
+/// 
+/// We always try to upgrade to TLS. 
+/// The `TlsStance` is used to decide what to do when the server doesnt support TLS
+/// - `AllowNonTls` -> will simply continue without TLS
+/// - `RejectNonTls` -> will return `Error(ServerDoesntSupportTls)`
+///
+pub fn start_smtp(
+  host host: String,
+  port port: Int,
+  auth auth: Option(Auth),
+  tls tls: TlsStance,
+) -> Result(Mailer, Error) {
   use socket <- result.try(
-    connect_smtp(SmtpMailer(
-      host: mailer.host,
-      port: mailer.port,
-      username: mailer.username,
-      password: mailer.password,
-      auth: mailer.auth,
-    )),
+    mug.new(host, port)
+    |> mug.timeout(milliseconds: 500)
+    |> mug.connect()
+    |> result.map_error(FailedToConnect),
   )
 
-  let from_cmd = "MAIL FROM:<" <> mailer.username <> ">"
-  use _ <- result.try(socket_send(socket, from_cmd))
-  use _ <- result.try(socket_receive(socket))
+  use resp <- result.try(socket_receive(socket))
 
+  let ehlo = case string.contains(resp, "ESMTP") {
+    True -> socket_send(socket, "EHLO " <> host)
+    False -> socket_send(socket, "HELO " <> host)
+  }
+  use _ <- result.try(ehlo)
+
+  use helo_resp <- result.try(socket_receive(socket))
+
+  let ehlo = case string.contains(helo_resp, "STARTTLS") {
+    False -> {
+      case tls {
+        // if the user is ok with not having tls, so be it
+        AllowNonTls -> #(helo_resp, socket) |> Ok
+        // otherwise error
+        RejectNonTls -> Error(ServerDoesntSupportTls)
+      }
+    }
+    True -> {
+      use _ <- result.try(socket_send(socket, "STARTTLS"))
+      use _ <- result.try(socket_receive(socket))
+
+      use socket <- result.try(
+        mug.upgrade(socket, mug.DangerouslyDisableVerification, 10_000)
+        |> result.map_error(FailedToUpgrade),
+      )
+      use _ <- result.try(socket_send(socket, "EHLO " <> host))
+      use resp <- result.try(socket_receive(socket))
+      #(resp, socket) |> Ok
+    }
+  }
+  use #(helo_resp, socket) <- result.try(ehlo)
+
+  use _ <- result.try(case auth {
+    None -> Ok(Nil)
+    Some(auth) -> auth_user(socket, auth, helo_resp)
+  })
+
+  Ok(Smtp(socket))
+}
+
+fn auth_user(
+  socket: mug.Socket,
+  auth: Auth,
+  helo_resp: String,
+) -> Result(Nil, Error) {
+  // return Error if helo doesnt contain auth i.e. the server doesnt support it
+  // it is up to the user of the library to decide how to deal with that
+  use <- bool.guard(
+    when: !string.contains(helo_resp, "AUTH"),
+    return: Error(ServerDoesntSupportAuthentication),
+  )
+
+  use _ <- result.try(socket_send(socket, "AUTH LOGIN"))
+  use _ <- result.try(socket_receive(socket))
+  // todo: check resp
+  use _ <- result.try(socket_send(
+    socket,
+    auth.username
+      |> bit_array.from_string()
+      |> bit_array.base64_encode(True),
+  ))
+
+  use _ <- result.try(socket_receive(socket))
+  use _ <- result.try(socket_send(
+    socket,
+    auth.password
+      |> bit_array.from_string()
+      |> bit_array.base64_encode(True),
+  ))
+  use _ <- result.try(socket_receive(socket))
+  Ok(Nil)
+}
+
+/// send a message via smtp through a given mug socket
+/// 
+fn send_smtp(socket: mug.Socket, msg: Message) -> Result(Nil, Error) {
+  let from_cmd = "MAIL FROM:<" <> msg.data.from.address <> ">"
+  use _ <- result.try(socket_send(socket, from_cmd))
+
+  use resp <- result.try(socket_receive(socket))
+  use <- bool.guard(
+    when: !string.contains(resp, "250"),
+    return: Error(FailedToSendStart(resp)),
+  )
+
+  // TODO: cc & bcc
   let rcpt =
     list.map(msg.data.to, fn(recipient) {
       let to_cmd = "RCPT TO:<" <> recipient.address <> ">"
@@ -399,20 +528,32 @@ fn send_smtp(mailer: Mailer, msg: Message) -> Result(Nil, Error) {
     |> result.all()
   use _ <- result.try(rcpt)
 
+  // start message data 
+  // i.e. everything from here until <CRLF>.<CRLF> is the content of the message
+  // and no response will be sent until that 
   use _ <- result.try(socket_send(socket, "DATA"))
-  use _ <- result.try(socket_receive(socket))
+  use resp <- result.try(socket_receive(socket))
 
+  // code 354 -> ok, send data
+  use <- bool.guard(
+    when: !string.contains(resp, "354"),
+    return: Error(NotAllowedToSendData(resp)),
+  )
+
+  // send the message
   let message = render(msg)
   use _ <- result.try(socket_send(socket, message))
-  use _ <- result.try(socket_receive(socket))
 
   // tell the server this message is done
   use _ <- result.try(socket_send(socket, "\r\n."))
-  use _ <- result.try(socket_receive(socket))
+  use resp <- result.try(socket_receive(socket))
 
-  // close the socket
-  use _ <- result.try(socket_send(socket, "QUIT"))
-  use _ <- result.try(socket_receive(socket))
+  // 250 -> OK, transaction finished
+  use <- bool.guard(
+    when: !string.contains(resp, "250"),
+    return: Error(FailedToFinishTransaction(resp)),
+  )
+
   Ok(Nil)
 }
 
@@ -432,86 +573,4 @@ fn socket_receive(socket: mug.Socket) -> Result(String, Error) {
   )
   bit_array.to_string(packet)
   |> result.replace_error(InvalidUtf8Response(packet))
-}
-
-fn connect_smtp(mailer: Mailer) -> Result(mug.Socket, Error) {
-  use socket <- result.try(
-    mug.new(mailer.host, mailer.port)
-    |> mug.timeout(milliseconds: 500)
-    |> mug.connect()
-    |> result.map_error(FailedToConnect),
-  )
-
-  use resp <- result.try(socket_receive(socket))
-
-  let ehlo = case string.contains(resp, "ESMTP") {
-    True -> socket_send(socket, "EHLO " <> mailer.host)
-    False -> socket_send(socket, "HELO " <> mailer.host)
-  }
-  use _ <- result.try(ehlo)
-
-  use helo_resp <- result.try(socket_receive(socket))
-
-  let ehlo = case string.contains(helo_resp, "STARTTLS") {
-    False -> #(helo_resp, socket) |> Ok
-    True -> {
-      use _ <- result.try(socket_send(socket, "STARTTLS"))
-      use _ <- result.try(
-        mug.receive(socket, 5000) |> result.map_error(FailedToReceive),
-      )
-
-      use socket <- result.try(
-        mug.upgrade(socket, mug.DangerouslyDisableVerification, 10_000)
-        |> result.map_error(FailedToUpgrade),
-      )
-      use _ <- result.try(socket_send(socket, "EHLO " <> mailer.host))
-      use resp <- result.try(socket_receive(socket))
-      #(resp, socket) |> Ok
-    }
-  }
-  use #(helo_resp, socket) <- result.try(ehlo)
-
-  use _ <- result.try(case mailer.auth {
-    False -> Ok(Nil)
-    True -> auth_user(socket, mailer, helo_resp)
-  })
-
-  socket
-  |> Ok
-}
-
-fn auth_user(
-  socket: mug.Socket,
-  mailer: Mailer,
-  helo_resp: String,
-) -> Result(Nil, Error) {
-  case string.contains(helo_resp, "AUTH") {
-    False -> {
-      io.println_error(
-        "SMTP server does not support authentication. Proceeding as unauthenticated user.",
-      )
-      |> Ok
-    }
-    True -> {
-      use _ <- result.try(socket_send(socket, "AUTH LOGIN"))
-      use _ <- result.try(socket_receive(socket))
-      // todo: check resp
-      use _ <- result.try(socket_send(
-        socket,
-        mailer.username
-          |> bit_array.from_string()
-          |> bit_array.base64_encode(True),
-      ))
-
-      use _ <- result.try(socket_receive(socket))
-      use _ <- result.try(socket_send(
-        socket,
-        mailer.password
-          |> bit_array.from_string()
-          |> bit_array.base64_encode(True),
-      ))
-      use _ <- result.try(socket_receive(socket))
-      Ok(Nil)
-    }
-  }
 }

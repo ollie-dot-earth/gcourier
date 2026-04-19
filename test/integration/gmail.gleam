@@ -29,12 +29,16 @@ pub fn main() {
     _ -> msg
   }
 
-  gcourier.send(
-    "smtp.gmail.com",
-    587,
-    Some(#(sender_email, sender_password)),
-    msg,
-  )
+  let assert Ok(mailer) =
+    gcourier.start_smtp(
+      "smtp.gmail.com",
+      587,
+      Some(gcourier.Auth(sender_email, sender_password)),
+      gcourier.AllowNonTls,
+    )
+
+  let assert Ok(_) = gcourier.send(mailer, msg)
+  let assert Ok(_) = gcourier.stop(mailer)
 }
 
 // External function to get user input (replacement for removed erlang.get_line)

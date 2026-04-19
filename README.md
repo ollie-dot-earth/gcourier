@@ -37,10 +37,23 @@ pub fn main() {
     ",
     ))
 
+  // start a new smtp mailer
+  let assert Ok(mailer) =
+    gcourier.start_smtp(
+      "localhost",
+      1025,
+      Some(gcourier.Auth("user1", "password1")),
+      gcourier.AllowNonTls,
+    )
+
   // Send the email
   // Navigate to localhost:8025 to view it in the browser.
-  let assert Ok(_) =
-    gcourier.send("localhost", 1025, Some(#("user1", "password1")), message)
+  let assert Ok(_) = gcourier.send(mailer, message)
+
+  // stop the mailer
+  let assert Ok(_) = gcourier.stop(mailer)
+
+ 
   process.sleep_forever()
 }
 ```
