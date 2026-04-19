@@ -4,7 +4,7 @@ title: from: Test User <test@example.com> | sender: Sender Name <sender@example.
 file: ./test/gcourier/message_test.gleam
 test_name: sender_header_test
 ---
-Date: Tue, 14 Apr 2026 20:26:23 00:00
+Date: Tue, 14 Apr 2026 20:26:23 +0000
 From: Test User <test@example.com>
 Sender: Sender Name <sender@example.com>
 Content-Type: text/plain

@@ -1,6 +1,5 @@
 import gcourier/mug/mug
 import gleam/bit_array
-import gleam/float
 import gleam/int
 import gleam/io
 import gleam/list
@@ -8,7 +7,6 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/calendar
-import gleam/time/duration
 import gleam/time/timestamp
 import youid/uuid
 
@@ -299,17 +297,6 @@ fn date_from_timestamp(timestamp: timestamp.Timestamp) -> String {
     calendar.month_to_string(cal.month) |> string.slice(0, 3)
   }
 
-  let offset = float.round(duration.to_seconds(calendar.utc_offset))
-  let offset_sign = case offset > 0 {
-    True -> "+"
-    False -> ""
-  }
-
-  let offset_hours =
-    { offset / 3600 } |> int.to_string |> string.pad_start(2, "0")
-  let offset_minutes =
-    { { offset % 3600 } / 60 } |> int.to_string |> string.pad_start(2, "0")
-
   day_of_week(cal.day, calendar.month_to_int(cal.month), cal.year)
   <> ", "
   <> int.to_string(cal.day)
@@ -323,11 +310,8 @@ fn date_from_timestamp(timestamp: timestamp.Timestamp) -> String {
   <> int.to_string(time.minutes)
   <> ":"
   <> int.to_string(time.seconds)
-  <> " "
-  <> offset_sign
-  <> offset_hours
-  <> ":"
-  <> offset_minutes
+  // since we always use UTC
+  <> " +0000"
 }
 
 pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
