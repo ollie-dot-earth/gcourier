@@ -24,6 +24,8 @@
             erlang_28
             rebar3
             bun
+            just
+            mailpit
           ];
 
           shellHook = ''
