@@ -336,8 +336,7 @@ pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
     3 -> "Tue"
     4 -> "Wed"
     5 -> "Thu"
-    6 -> "Fri"
-    _ -> panic
+    _ -> "Fri"
   }
 }
 
