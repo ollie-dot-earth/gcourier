@@ -184,7 +184,6 @@ fn format_headers(message: MessageData) -> String {
     <> optional_list_with_key("To", message.to, fn(item) { item.address })
     <> optional_with_key("Sender", message.sender |> option.map(format_sender))
     <> optional_list_with_key("Cc", message.cc, fn(item) { item.address })
-    <> optional_list_with_key("Bcc", message.bcc, fn(item) { item.address })
     <> optional_with_key("Subject", message.subject)
     <> with_key(
       "Content-Type",
@@ -198,6 +197,11 @@ fn format_headers(message: MessageData) -> String {
 /// Add the provided address to the list of recipients.
 /// 
 /// recipient_type should be one of To, Cc, or Bcc.
+///
+/// We implement the first variant of bcc handling layed out in [RFC 5322](https://www.rfc-editor.org/rfc/rfc5322#section-3.6.3)
+/// i.e.: The bcc header does not end up in the actual message
+/// if you need one of the other implementations, feel free to [open an issue](https://github.com/gideongrinberg/gcourier/issues)
+///
 pub fn add_recipient(message: Message, recipient: Recipient) -> Message {
   case recipient {
     To(_) -> MessageData(..message.data, to: [recipient, ..message.data.to])
