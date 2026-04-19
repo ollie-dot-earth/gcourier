@@ -14,7 +14,7 @@ pub fn main() {
   let attach = input("Attach file? (y/N)")
 
   let msg =
-    gcourier.new_message(gcourier.Sender(sender_email, None))
+    gcourier.new_message(gcourier.Address(None, sender_email))
     |> gcourier.add_recipient(gcourier.To(recipient_email))
     |> gcourier.set_subject(subject)
     |> gcourier.set_content(gcourier.Text(body))

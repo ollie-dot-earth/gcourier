@@ -15,23 +15,23 @@ fn consistent_time(message: gcourier.Message) -> gcourier.Message {
 }
 
 pub fn from_address_test() -> Nil {
-  gcourier.new_message(gcourier.Sender("test@example.com", Some("Test User")))
+  gcourier.new_message(gcourier.Address(Some("Test User"), "test@example.com"))
   |> consistent_time()
   |> gcourier.render()
   |> birdie.snap("from: Test User <test@example.com>")
 
-  gcourier.new_message(gcourier.Sender("test@example.com", None))
+  gcourier.new_message(gcourier.Address(None, "test@example.com"))
   |> consistent_time()
   |> gcourier.render()
   |> birdie.snap("from: <test@example.com>")
 }
 
 pub fn sender_header_test() -> Nil {
-  gcourier.new_message(gcourier.Sender("test@example.com", Some("Test User")))
+  gcourier.new_message(gcourier.Address(Some("Test User"), "test@example.com"))
   |> consistent_time()
-  |> gcourier.set_sender(gcourier.Sender(
-    "sender@example.com",
+  |> gcourier.set_sender(gcourier.Address(
     Some("Sender Name"),
+    "sender@example.com",
   ))
   |> gcourier.render()
   |> birdie.snap(
@@ -40,7 +40,7 @@ pub fn sender_header_test() -> Nil {
 }
 
 pub fn recipients_test() -> Nil {
-  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  gcourier.new_message(gcourier.Address(None, "from@example.com"))
   |> gcourier.add_recipient(gcourier.To("to@example.com"))
   |> gcourier.add_recipient(gcourier.Cc("cc@example.com"))
   |> gcourier.add_recipient(gcourier.Bcc("bcc@example.com"))
@@ -53,7 +53,7 @@ pub fn recipients_test() -> Nil {
 }
 
 pub fn subject_test() -> Nil {
-  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  gcourier.new_message(gcourier.Address(None, "from@example.com"))
   |> gcourier.set_subject("Test Subject")
   |> consistent_time()
   |> gcourier.render()
@@ -61,18 +61,18 @@ pub fn subject_test() -> Nil {
 }
 
 pub fn content_type_test() -> Nil {
-  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  gcourier.new_message(gcourier.Address(None, "from@example.com"))
   |> consistent_time()
   |> gcourier.render()
   |> birdie.snap("No content, Content-Type 'text/plain'")
 
-  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  gcourier.new_message(gcourier.Address(None, "from@example.com"))
   |> gcourier.set_content(gcourier.Text("Test text"))
   |> consistent_time()
   |> gcourier.render()
   |> birdie.snap("Content 'Test text', Content-Type 'text/plain'")
 
-  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  gcourier.new_message(gcourier.Address(None, "from@example.com"))
   |> gcourier.set_content(gcourier.Html("<p>Test HTML</p>"))
   |> consistent_time()
   |> gcourier.render()
@@ -80,7 +80,7 @@ pub fn content_type_test() -> Nil {
 }
 
 pub fn render_headers_test() -> Nil {
-  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  gcourier.new_message(gcourier.Address(None, "from@example.com"))
   |> gcourier.add_recipient(gcourier.To("to@example.com"))
   |> gcourier.set_subject("Test Subject")
   |> gcourier.set_content(gcourier.Text("Hello world"))
@@ -90,7 +90,7 @@ pub fn render_headers_test() -> Nil {
 }
 
 pub fn missing_to_test() -> Nil {
-  gcourier.new_message(gcourier.Sender("from@example.com", None))
+  gcourier.new_message(gcourier.Address(None, "from@example.com"))
   |> gcourier.set_subject("Test Subject")
   |> gcourier.set_content(gcourier.Text("Hello world"))
   |> consistent_time()

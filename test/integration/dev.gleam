@@ -11,9 +11,9 @@ fn test_regular() {
   // TODO: integrate with externally running mailpit
 
   let message =
-    gcourier.new_message(gcourier.Sender(
-      "party@funclub.org",
+    gcourier.new_message(gcourier.Address(
       Some("The Fun Club 🎉"),
+      "party@funclub.org",
     ))
     |> gcourier.add_recipient(gcourier.To("jane.doe@example.com"))
     |> gcourier.add_recipient(gcourier.Cc("john.doe@example.net"))

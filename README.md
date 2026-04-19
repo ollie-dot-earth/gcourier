@@ -18,10 +18,7 @@ import gleam/option.{Some}
 
 pub fn main() {
   let message =
-    gcourier.new_message(gcourier.Sender(
-      "party@funclub.org",
-      Some("The Fun Club 🎉"),
-    ))
+    gcourier.new_message(gcourier.Sender(Address("The Fun Club 🎉"), "party@funclub.org"))
     |> gcourier.add_recipient(gcourier.To("jane.doe@example.com"))
     |> gcourier.add_recipient(gcourier.Cc("john.doe@example.net"))
     |> gcourier.set_subject("You're Invited: Pizza & Ping Pong Night!")

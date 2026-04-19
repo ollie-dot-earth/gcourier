@@ -33,7 +33,7 @@ pub opaque type Message {
 type MessageData {
   MessageData(
     // Required
-    from: Sender,
+    from: Address,
     content: Content,
     // Optional 
     subject: Option(String),
@@ -42,7 +42,7 @@ type MessageData {
     cc: List(Recipient),
     bcc: List(Recipient),
     timestamp: Option(timestamp.Timestamp),
-    sender: Option(Sender),
+    sender: Option(Address),
   )
 }
 
@@ -52,8 +52,8 @@ pub type Recipient {
   Bcc(address: String)
 }
 
-pub type Sender {
-  Sender(address: String, name: Option(String))
+pub type Address {
+  Address(name: Option(String), address: String)
 }
 
 pub type Content {
@@ -68,7 +68,7 @@ fn content_type(content: Content) -> String {
   }
 }
 
-pub fn new_message(from from: Sender) -> Message {
+pub fn new_message(from from: Address) -> Message {
   Simple(data: MessageData(
     from:,
     content: Text(""),
@@ -167,7 +167,7 @@ fn format_headers(message: MessageData) -> String {
     }
   }
 
-  let format_sender = fn(sender: Sender) {
+  let format_sender = fn(sender: Address) {
     format_address(sender.address, sender.name)
   }
 
@@ -221,7 +221,7 @@ pub fn set_subject(message: Message, subject: String) -> Message {
 /// 
 /// This field is useful when the email is sent on behalf of 
 /// a third party or there are multiple emails in the FROM field.
-pub fn set_sender(message: Message, sender: Sender) -> Message {
+pub fn set_sender(message: Message, sender: Address) -> Message {
   update_message_data(
     message,
     MessageData(..message.data, sender: Some(sender)),
