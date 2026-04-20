@@ -12,13 +12,6 @@ import youid/uuid
 
 // messages ---------------------------------------------------------------------
 
-pub type MessageCreationError {
-  MissingContentTypeHeader
-  MissingAttachments
-  MissingFrom
-  MissingRecipientTo
-}
-
 pub type Attachment {
   Attachment(name: String, content_type: String, content: String)
 }
@@ -52,7 +45,6 @@ type MessageData {
 /// the IMF (rfc5322) doesn't require a recipient 
 /// but since SMTP (rfc5321) does, we also do
 ///
-///
 pub fn new_message(from from: Address, to recipient: Address) -> Message {
   Simple(
     data: MessageData(
@@ -70,6 +62,8 @@ pub fn new_message(from from: Address, to recipient: Address) -> Message {
   )
 }
 
+/// Render a `Message` into *I*nternet *M*essage *F*ormat (*IMF* rfc5322) compliant form
+///
 pub fn render(message: Message) -> String {
   case message {
     Simple(data:) -> render_single(data)
@@ -254,7 +248,7 @@ fn content_type(content: Content) -> String {
   }
 }
 
-/// add an attachment to a message
+/// Add an attachment to a message
 ///
 pub fn add_attachment(
   message: Message,
@@ -276,6 +270,7 @@ pub fn add_attachment(
 // Misc headers -----------------------------------------------------------------
 
 /// Set the message's subject line. Optional.
+///
 pub fn set_subject(message: Message, subject: String) -> Message {
   update_message_data(
     message,
@@ -305,8 +300,6 @@ pub type CustomHeader {
 }
 
 /// Add a non-standard header
-///
-/// 
 ///
 pub fn add_custom_header(message: Message, header: CustomHeader) -> Message {
   update_message_data(
@@ -379,37 +372,96 @@ pub fn day_of_week(day q: Int, month m: Int, year y: Int) -> String {
 
 // mailer agnostic --------------------------------------------------------------
 
+/// All errors that may occur
+///
 pub type Error {
+  /// There was an issue with the SMTP connection
+  ///
+  SmtpError(SmtpError)
+  /// There was an issue with the underlying socket
+  ///
+  SocketError(SocketError)
+  /// We failed to send the message, and something went wrong while attempting to reset the transaction
+  ///
+  ResetError(ResetError)
+
+  /// We failed to send the message, but resetting the transaction went Ok
+  /// i.e. the `Mailer` should still be usable
+  /// if you got a different error, you'll probably need to recreate the `Mailer`
+  ///
+  FailedToSendButResetOk
+}
+
+/// Errors related to SMTP processes
+/// Like unexpected response codes, the server lacking features or issues during a transaction
+///
+pub type SmtpError {
   // only happens during initial connection
+  /// You supplied credentials, but the server doesnt support authentication
+  ///
   ServerDoesntSupportAuthentication
+
+  /// The SMTP server doesnt support TLS
+  /// And you supplied `RejectNonTls` as your `TlsStance`
+  ///
   ServerDoesntSupportTls
-  FailedToConnect(mug.Error)
-  FailedToUpgrade(mug.Error)
-
-  // only happens during `stop`
-  FailedToClose(mug.Error)
-
-  // happens both during connection and message sending
-  FailedToReceive(mug.Error)
-  InvalidUtf8Response(BitArray)
-  FailedToSend(mug.Error)
 
   // happens during sending 
   /// `MAIL FROM:` got a response that wasnt the expected `250 OK`
   ///
-  FailedToSendStart(String)
+  FailedToSendStart(response: String)
   /// `DATA` got non 354 response
   ///
-  NotAllowedToSendData(String)
+  NotAllowedToSendData(response: String)
+
   /// finishing `<CRLF>.<CRLF>` got a non `250 OK` response
   /// 
   /// i.e. the connection is in an odd state and should probably be recreated
   ///
-  FailedToFinishTransaction(String)
+  FailedToFinishTransaction(response: String)
+}
+
+/// Issues with the underlying TCP socket
+/// i.e. Errors while connecting, upgrading to TLS, sending or recieving
+///
+pub type SocketError {
+
+  // only happens during startup
+  /// The underlying socket failed to connect
+  ///
+  FailedToConnect(mug.Error)
+
+  /// Failed to upgrade the underlying socket to TLS
+  ///
+  FailedToUpgrade(mug.Error)
+
+  // only happens during `stop`
+  /// The underlying socket failed to close
+  ///
+  FailedToClose(mug.Error)
+
+  // primarily during message sending
+  /// An error occured while receiving a message from the socket
+  ///
+  FailedToReceive(mug.Error)
+  /// The received content wasn't UTF-8
+  ///
+  InvalidUtf8Response(BitArray)
+  /// Something went wrong while sending a packet
+  ///
+  FailedToSend(failed_to_send: String, with_error: mug.Error)
+}
+
+pub type ResetError {
+  /// A mail sending transaction failed, we tried to reset but that failed
+  ///
+  /// i.e. stop and recreate the `Mailer`
+  ///
+  FailedToResetSmtpError(original_error: SmtpError, reset_error: String)
 }
 
 pub opaque type Mailer {
-  Smtp(mug.Socket)
+  Smtp(socket: mug.Socket)
 }
 
 pub type Auth {
@@ -425,7 +477,9 @@ pub type TlsStance {
 ///
 pub fn send(mailer: Mailer, message: Message) -> Result(Nil, Error) {
   case mailer {
-    Smtp(socket) -> send_smtp(socket, message)
+    Smtp(socket) ->
+      send_smtp(socket, message)
+      |> result.try_recover(reset_smtp(_, socket))
   }
 }
 
@@ -438,7 +492,9 @@ pub fn stop(mailer: Mailer) -> Result(Nil, Error) {
       use _ <- result.try(socket_send(socket, "QUIT"))
       use _ <- result.try(socket_receive(socket))
 
-      mug.shutdown(socket) |> result.map_error(FailedToClose)
+      mug.shutdown(socket)
+      |> result.map_error(FailedToClose)
+      |> result.map_error(SocketError)
     }
   }
 }
@@ -465,7 +521,8 @@ pub fn start_smtp(
     mug.new(host, port)
     |> mug.timeout(milliseconds: 500)
     |> mug.connect()
-    |> result.map_error(FailedToConnect),
+    |> result.map_error(FailedToConnect)
+    |> result.map_error(SocketError),
   )
 
   use resp <- result.try(socket_receive(socket))
@@ -484,7 +541,7 @@ pub fn start_smtp(
         // if the user is ok with not having tls, so be it
         AllowNonTls -> #(helo_resp, socket) |> Ok
         // otherwise error
-        RejectNonTls -> Error(ServerDoesntSupportTls)
+        RejectNonTls -> Error(SmtpError(ServerDoesntSupportTls))
       }
     }
     True -> {
@@ -492,8 +549,10 @@ pub fn start_smtp(
       use _ <- result.try(socket_receive(socket))
 
       use socket <- result.try(
+        // TODO: proper cert verification?
         mug.upgrade(socket, mug.DangerouslyDisableVerification, 10_000)
-        |> result.map_error(FailedToUpgrade),
+        |> result.map_error(FailedToUpgrade)
+        |> result.map_error(SocketError),
       )
       use _ <- result.try(socket_send(socket, "EHLO " <> host))
       use resp <- result.try(socket_receive(socket))
@@ -519,7 +578,7 @@ fn auth_user(
   // it is up to the user of the library to decide how to deal with that
   use <- bool.guard(
     when: !string.contains(helo_resp, "AUTH"),
-    return: Error(ServerDoesntSupportAuthentication),
+    return: Error(SmtpError(ServerDoesntSupportAuthentication)),
   )
 
   use _ <- result.try(socket_send(socket, "AUTH LOGIN"))
@@ -543,6 +602,34 @@ fn auth_user(
   Ok(Nil)
 }
 
+/// reset a failed smtp transaction
+///
+fn reset_smtp(error: Error, socket: mug.Socket) -> Result(Nil, Error) {
+  case error {
+    // Something went wrong during the transaction;
+    // maybe RSET will get the connection back to a usable state
+    // 
+    SmtpError(error) -> {
+      use _ <- result.try(socket_send(socket, "RSET"))
+
+      use resp <- result.try(socket_receive(socket))
+      case string.contains(resp, "250") {
+        True -> Error(FailedToSendButResetOk)
+        False -> Error(ResetError(FailedToResetSmtpError(error, resp)))
+      }
+    }
+
+    // something went wrong with the socket 
+    // theres not much we can do here
+    //
+    SocketError(_) -> Error(error)
+
+    // and these last two dont happen
+    FailedToSendButResetOk -> Error(error)
+    ResetError(_) -> Error(error)
+  }
+}
+
 /// send a message via smtp through a given mug socket
 /// 
 fn send_smtp(socket: mug.Socket, msg: Message) -> Result(Nil, Error) {
@@ -552,7 +639,7 @@ fn send_smtp(socket: mug.Socket, msg: Message) -> Result(Nil, Error) {
   use resp <- result.try(socket_receive(socket))
   use <- bool.guard(
     when: !string.contains(resp, "250"),
-    return: Error(FailedToSendStart(resp)),
+    return: Error(SmtpError(FailedToSendStart(resp))),
   )
 
   // TODO: cc & bcc
@@ -574,7 +661,7 @@ fn send_smtp(socket: mug.Socket, msg: Message) -> Result(Nil, Error) {
   // code 354 -> ok, send data
   use <- bool.guard(
     when: !string.contains(resp, "354"),
-    return: Error(NotAllowedToSendData(resp)),
+    return: Error(SmtpError(NotAllowedToSendData(resp))),
   )
 
   // send the message
@@ -588,7 +675,7 @@ fn send_smtp(socket: mug.Socket, msg: Message) -> Result(Nil, Error) {
   // 250 -> OK, transaction finished
   use <- bool.guard(
     when: !string.contains(resp, "250"),
-    return: Error(FailedToFinishTransaction(resp)),
+    return: Error(SmtpError(FailedToFinishTransaction(resp))),
   )
 
   Ok(Nil)
@@ -598,7 +685,8 @@ fn send_smtp(socket: mug.Socket, msg: Message) -> Result(Nil, Error) {
 ///
 fn socket_send(socket: mug.Socket, value: String) -> Result(Nil, Error) {
   mug.send(socket, <<{ value <> "\r\n" }:utf8>>)
-  |> result.map_error(FailedToSend)
+  |> result.map_error(FailedToSend(value, _))
+  |> result.map_error(SocketError)
 }
 
 /// receive one message from the socket
@@ -606,8 +694,10 @@ fn socket_send(socket: mug.Socket, value: String) -> Result(Nil, Error) {
 ///
 fn socket_receive(socket: mug.Socket) -> Result(String, Error) {
   use packet <- result.try(
-    mug.receive(socket, 5000) |> result.map_error(FailedToReceive),
+    mug.receive(socket, 5000)
+    |> result.map_error(FailedToReceive)
+    |> result.map_error(SocketError),
   )
   bit_array.to_string(packet)
-  |> result.replace_error(InvalidUtf8Response(packet))
+  |> result.replace_error(SocketError(InvalidUtf8Response(packet)))
 }
