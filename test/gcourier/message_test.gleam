@@ -102,6 +102,24 @@ pub fn content_type_test() -> Nil {
   |> birdie.snap("Content '<p>Test HTML</p>', Content-Type 'text/html'")
 }
 
+pub fn custom_header_test() -> Nil {
+  gcourier.new_message(
+    gcourier.Address(Some("Test User"), "test@example.com"),
+    gcourier.Address(None, "test1@example.com"),
+  )
+  |> gcourier.add_custom_header(gcourier.CustomHeader(
+    "MyCustomHeader",
+    "MyCustomHeaderValue",
+  ))
+  |> gcourier.add_custom_header(gcourier.CustomHeader(
+    "MyOtherCustomHeader",
+    "MyOtherCustomHeaderValue",
+  ))
+  |> consistent_time()
+  |> gcourier.render()
+  |> birdie.snap("MyCustomHeader and MyOtherCustomHeader")
+}
+
 pub fn week_day_test() -> Nil {
   // Basic tests for each day of the week
   gcourier.day_of_week(10, 5, 2025) |> should.equal("Sat")

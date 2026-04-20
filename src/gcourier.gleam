@@ -43,40 +43,8 @@ type MessageData {
     bcc: List(Recipient),
     timestamp: Option(timestamp.Timestamp),
     sender: Option(Address),
+    custom_headers: List(CustomHeader),
   )
-}
-
-pub type Recipient {
-  To(address: Address)
-  Cc(address: Address)
-  Bcc(address: Address)
-}
-
-pub type Address {
-  Address(name: Option(String), address: String)
-}
-
-fn format_address(address: Address) -> String {
-  let Address(name:, address:) = address
-
-  case name {
-    Some(name) -> {
-      name <> " <" <> address <> ">"
-    }
-    None -> address
-  }
-}
-
-pub type Content {
-  Text(text: String)
-  Html(text: String)
-}
-
-fn content_type(content: Content) -> String {
-  case content {
-    Text(text: _) -> "text/plain"
-    Html(text: _) -> "text/html"
-  }
 }
 
 /// create a new message
@@ -86,17 +54,20 @@ fn content_type(content: Content) -> String {
 ///
 ///
 pub fn new_message(from from: Address, to recipient: Address) -> Message {
-  Simple(data: MessageData(
-    from:,
-    content: Text(""),
-    subject: None,
-    to: [To(recipient)],
-    cc: [],
-    bcc: [],
-    timestamp: None,
-    content_type_override: None,
-    sender: None,
-  ))
+  Simple(
+    data: MessageData(
+      from:,
+      content: Text(""),
+      subject: None,
+      to: [To(recipient)],
+      cc: [],
+      bcc: [],
+      timestamp: None,
+      content_type_override: None,
+      sender: None,
+      custom_headers: [],
+    ),
+  )
 }
 
 pub fn render(message: Message) -> String {
@@ -184,6 +155,12 @@ fn format_headers(message: MessageData) -> String {
     }
   }
 
+  let format_custom_headers = fn(headers: List(CustomHeader)) {
+    list.fold(headers, "", fn(acc, header) {
+      header.name <> ": " <> header.value <> "\r\n" <> acc
+    })
+  }
+
   let _ =
     with_key(
       "Date",
@@ -201,9 +178,31 @@ fn format_headers(message: MessageData) -> String {
       message.content_type_override
         |> option.unwrap(message.content |> content_type()),
     )
+    <> format_custom_headers(message.custom_headers)
 }
 
-// Header setting functions
+// Recipients & Address ---------------------------------------------------------
+
+pub type Address {
+  Address(name: Option(String), address: String)
+}
+
+fn format_address(address: Address) -> String {
+  let Address(name:, address:) = address
+
+  case name {
+    Some(name) -> {
+      name <> " <" <> address <> ">"
+    }
+    None -> address
+  }
+}
+
+pub type Recipient {
+  To(address: Address)
+  Cc(address: Address)
+  Bcc(address: Address)
+}
 
 /// Add the provided address to the list of recipients.
 /// 
@@ -222,14 +221,6 @@ pub fn add_recipient(message: Message, recipient: Recipient) -> Message {
   |> update_message_data(message, _)
 }
 
-/// Set the message's subject line. Optional.
-pub fn set_subject(message: Message, subject: String) -> Message {
-  update_message_data(
-    message,
-    MessageData(..message.data, subject: Some(subject)),
-  )
-}
-
 /// Set the _optional_ sender header. 
 /// 
 /// This field is useful when the email is sent on behalf of 
@@ -241,22 +232,7 @@ pub fn set_sender(message: Message, sender: Address) -> Message {
   )
 }
 
-/// Set the Date header for the email. Optional.
-///
-/// If this is not explicitly set, the current system time will be used automatically
-/// when the message is sent. This header indicates when the email was created.
-///
-pub fn set_timestamp(
-  message: Message,
-  timestamp: timestamp.Timestamp,
-) -> Message {
-  update_message_data(
-    message,
-    MessageData(..message.data, timestamp: Some(timestamp)),
-  )
-}
-
-// Content functions
+// Content ----------------------------------------------------------------------
 
 /// set the content of a message
 ///
@@ -264,6 +240,18 @@ pub fn set_timestamp(
 ///
 pub fn set_content(message: Message, content: Content) -> Message {
   update_message_data(message, MessageData(..message.data, content:))
+}
+
+pub type Content {
+  Text(text: String)
+  Html(text: String)
+}
+
+fn content_type(content: Content) -> String {
+  case content {
+    Text(text: _) -> "text/plain"
+    Html(text: _) -> "text/html"
+  }
 }
 
 /// add an attachment to a message
@@ -283,6 +271,51 @@ pub fn add_attachment(
     MultiPart(data:, attachments:) ->
       MultiPart(data:, attachments: [attachment, ..attachments])
   }
+}
+
+// Misc headers -----------------------------------------------------------------
+
+/// Set the message's subject line. Optional.
+pub fn set_subject(message: Message, subject: String) -> Message {
+  update_message_data(
+    message,
+    MessageData(..message.data, subject: Some(subject)),
+  )
+}
+
+/// Set the Date header for the email. Optional.
+///
+/// If this is not explicitly set, the current system time will be used automatically
+/// when the message is sent. This header indicates when the email was created.
+///
+pub fn set_timestamp(
+  message: Message,
+  timestamp: timestamp.Timestamp,
+) -> Message {
+  update_message_data(
+    message,
+    MessageData(..message.data, timestamp: Some(timestamp)),
+  )
+}
+
+// Custom headers ---------------------------------------------------------------
+
+pub type CustomHeader {
+  CustomHeader(name: String, value: String)
+}
+
+/// Add a non-standard header
+///
+/// 
+///
+pub fn add_custom_header(message: Message, header: CustomHeader) -> Message {
+  update_message_data(
+    message,
+    MessageData(..message.data, custom_headers: [
+      header,
+      ..message.data.custom_headers
+    ]),
+  )
 }
 
 // Utility functions ------------------------------------------------------------
