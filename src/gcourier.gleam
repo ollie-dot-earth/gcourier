@@ -47,13 +47,24 @@ type MessageData {
 }
 
 pub type Recipient {
-  To(address: String)
-  Cc(address: String)
-  Bcc(address: String)
+  To(address: Address)
+  Cc(address: Address)
+  Bcc(address: Address)
 }
 
 pub type Address {
   Address(name: Option(String), address: String)
+}
+
+fn format_address(address: Address) -> String {
+  let Address(name:, address:) = address
+
+  case name {
+    Some(name) -> {
+      name <> " <" <> address <> ">"
+    }
+    None -> address
+  }
 }
 
 pub type Content {
@@ -68,12 +79,18 @@ fn content_type(content: Content) -> String {
   }
 }
 
-pub fn new_message(from from: Address) -> Message {
+/// create a new message
+///
+/// the IMF (rfc5322) doesn't require a recipient 
+/// but since SMTP (rfc5321) does, we also do
+///
+///
+pub fn new_message(from from: Address, to recipient: Address) -> Message {
   Simple(data: MessageData(
     from:,
     content: Text(""),
     subject: None,
-    to: [],
+    to: [To(recipient)],
     cc: [],
     bcc: [],
     timestamp: None,
@@ -155,20 +172,16 @@ fn format_headers(message: MessageData) -> String {
     }
   }
 
-  let optional_list_with_key = fn(
-    key: String,
-    list: List(a),
-    transform: fn(a) -> String,
-  ) -> String {
+  let format_recipients = fn(key: String, list: List(Recipient)) -> String {
     case list {
       [] -> ""
       [_, ..] ->
-        key <> ": " <> list.map(list, transform) |> string.join(", ") <> "\r\n"
+        key
+        <> ": "
+        <> list.map(list, fn(recipient) { format_address(recipient.address) })
+        |> string.join(", ")
+        <> "\r\n"
     }
-  }
-
-  let format_sender = fn(sender: Address) {
-    format_address(sender.address, sender.name)
   }
 
   let _ =
@@ -178,10 +191,10 @@ fn format_headers(message: MessageData) -> String {
         |> option.unwrap(timestamp.system_time())
         |> date_from_timestamp(),
     )
-    <> with_key("From", format_address(message.from.address, message.from.name))
-    <> optional_list_with_key("To", message.to, fn(item) { item.address })
-    <> optional_with_key("Sender", message.sender |> option.map(format_sender))
-    <> optional_list_with_key("Cc", message.cc, fn(item) { item.address })
+    <> with_key("From", format_address(message.from))
+    <> format_recipients("To", message.to)
+    <> optional_with_key("Sender", message.sender |> option.map(format_address))
+    <> format_recipients("Cc", message.cc)
     <> optional_with_key("Subject", message.subject)
     <> with_key(
       "Content-Type",
@@ -278,15 +291,6 @@ fn update_message_data(message: Message, data: MessageData) -> Message {
   case message {
     Simple(..) -> Simple(data:)
     MultiPart(..) -> MultiPart(..message, data:)
-  }
-}
-
-fn format_address(address: String, name: Option(String)) -> String {
-  case name {
-    Some(name) -> {
-      name <> " <" <> address <> ">"
-    }
-    None -> address
   }
 }
 
@@ -521,7 +525,7 @@ fn send_smtp(socket: mug.Socket, msg: Message) -> Result(Nil, Error) {
   // TODO: cc & bcc
   let rcpt =
     list.map(msg.data.to, fn(recipient) {
-      let to_cmd = "RCPT TO:<" <> recipient.address <> ">"
+      let to_cmd = "RCPT TO:<" <> recipient.address.address <> ">"
       use _ <- result.try(socket_send(socket, to_cmd))
       socket_receive(socket)
     })

@@ -1,5 +1,4 @@
 import gcourier
-import gleam/erlang/process
 import gleam/option.{Some}
 
 pub fn main() {
@@ -8,12 +7,13 @@ pub fn main() {
 
 fn test_regular() {
   let message =
-    gcourier.new_message(gcourier.Address(
-      Some("The Fun Club 🎉"),
-      "party@funclub.org",
-    ))
-    |> gcourier.add_recipient(gcourier.To("jane.doe@example.com"))
-    |> gcourier.add_recipient(gcourier.Cc("john.doe@example.net"))
+    gcourier.new_message(
+      gcourier.Address(Some("The Fun Club 🎉"), "party@funclub.org"),
+      gcourier.Address(Some("Jane Doe"), "jane.doe@example.com"),
+    )
+    |> gcourier.add_recipient(
+      gcourier.Cc(gcourier.Address(Some("John Doe"), "john.doe@example.net")),
+    )
     |> gcourier.set_subject("You're Invited: Pizza & Ping Pong Night!")
     |> gcourier.set_content(gcourier.Html(
       "

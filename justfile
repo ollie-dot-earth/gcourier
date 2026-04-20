@@ -7,6 +7,9 @@ default:
 test: 
     gleam test
 
+birdie:
+    gleam run -m birdie
+
 # run an integration test
 # make sure to `start-dev-server` first
 integration-test: 
